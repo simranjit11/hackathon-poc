@@ -16,7 +16,7 @@ from datetime import datetime
 import os
 
 # Load environment variables
-load_dotenv(".env")
+load_dotenv()
 
 class Assistant(Agent):
     """Banking voice assistant with comprehensive financial services."""
