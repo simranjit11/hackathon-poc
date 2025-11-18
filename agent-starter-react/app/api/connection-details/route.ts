@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
+import { validateAccessToken, extractTokenFromHeader, type UserIdentity } from '@/lib/auth';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -29,19 +30,35 @@ export async function POST(req: Request) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
+    // Extract and validate access token from Authorization header
+    const authHeader = req.headers.get('Authorization');
+    let userIdentity: UserIdentity;
+    
+    try {
+      const token = extractTokenFromHeader(authHeader);
+      userIdentity = await validateAccessToken(token);
+    } catch (authError) {
+      console.error('Authentication error:', authError);
+      return new NextResponse(
+        authError instanceof Error ? authError.message : 'Authentication failed',
+        { status: 401 }
+      );
+    }
+
     // Parse agent configuration from request body
     const body = await req.json();
     const agentName: string = body?.room_config?.agents?.[0]?.agent_name;
 
-    // Generate participant token
+    // Generate participant token with user identity
     const participantName = 'user';
-    const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    const participantIdentity = `voice_assistant_user_${userIdentity.user_id}`;
+    const roomName = `voice_assistant_room_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
       roomName,
-      agentName
+      agentName,
+      userIdentity
     );
 
     // Return connection details
@@ -60,18 +77,21 @@ export async function POST(req: Request) {
       console.error(error);
       return new NextResponse(error.message, { status: 500 });
     }
+    return new NextResponse('Internal server error', { status: 500 });
   }
 }
 
 function createParticipantToken(
   userInfo: AccessTokenOptions,
   roomName: string,
-  agentName?: string
+  agentName?: string,
+  userIdentity?: UserIdentity
 ): Promise<string> {
   const at = new AccessToken(API_KEY, API_SECRET, {
     ...userInfo,
-    ttl: '15m',
+    ttl: '1h', // Set token expiration to 1 hour as per requirements
   });
+  
   const grant: VideoGrant = {
     room: roomName,
     roomJoin: true,
@@ -80,6 +100,17 @@ function createParticipantToken(
     canSubscribe: true,
   };
   at.addGrant(grant);
+
+  // Add custom claims to the token metadata
+  if (userIdentity) {
+    at.metadata = JSON.stringify({
+      user_id: userIdentity.user_id,
+      email: userIdentity.email,
+      roles: userIdentity.roles,
+      permissions: userIdentity.permissions,
+      session_type: 'voice_assistant',
+    });
+  }
 
   if (agentName) {
     at.roomConfig = new RoomConfiguration({

@@ -18,13 +18,98 @@ from livekit.agents import (
 )
 from livekit.agents import Agent, AgentSession, RunContext, ModelSettings
 from livekit.agents.llm import function_tool, mcp
+
 from livekit.agents import log as agents_log
 
 logger = agents_log.logger
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+from session_manager import get_session_manager
 # Note: VoicePipelineAgent and AgentTranscriptionOptions are not available in current livekit-agents version
 # Transcription options may need to be configured differently
+
+# Presidio Imports
+from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
+import re
+
+# Initialize Presidio Engines lazily (only when needed)
+# This avoids proxy/network issues during import
+_analyzer = None
+_anonymizer = None
+
+def get_analyzer():
+    """Get or create Presidio analyzer engine with custom OTP recognizer."""
+    global _analyzer
+    if _analyzer is None:
+        try:
+            #Create base analyzer
+            _analyzer = AnalyzerEngine()
+            
+            # Add custom OTP recognizer
+            # Pattern 1: Numeric OTPs (4-8 digits, optionally with spaces/dashes)
+            numeric_otp_pattern = r'\b\d{4,8}\b|\b\d{3,4}[-\s]\d{3,4}\b'
+            
+            # Pattern 2: Word-based OTPs (e.g., "one two three four five")
+            # Match sequences of number words (3-8 words) - basic number words only
+            otp_words = r'(?:one|two|three|four|five|six|seven|eight|nine|zero)'
+            # Match 3-8 consecutive number words - this is the core OTP value pattern
+            otp_value_only = rf'\b(?:{otp_words}\s+){{2,7}}{otp_words}\b'
+            
+            # Pattern 3: OTP with context - matches the full phrase but we'll extract just the value
+            # This helps with context scoring but the actual match should be the value part
+            otp_with_context_full = rf'\b(?:my|the|your)?(?:otp|code|pin|password|passcode|verification\s+code)\s+is\s+((?:{otp_words}\s+){{2,7}}{otp_words})\b'
+            
+            # Create recognizers for different patterns
+            numeric_otp_recognizer = PatternRecognizer(
+                supported_entity="OTP",
+                patterns=[
+                    Pattern(
+                        name="numeric_otp",
+                        regex=numeric_otp_pattern,
+                        score=0.8
+                    )
+                ],
+                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "verification"]
+            )
+            
+            # Primary recognizer for word-based OTP values
+            # This matches just the number words sequence (e.g., "one two three four five")
+            word_otp_recognizer = PatternRecognizer(
+                supported_entity="OTP",
+                patterns=[
+                    Pattern(
+                        name="otp_value_only",
+                        regex=otp_value_only,
+                        score=0.8
+                    )
+                ],
+                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "my", "the", "your", "is"],
+                # Increase context score when OTP-related words are nearby
+                supported_language="en"
+            )
+            
+            # Add both recognizers
+            _analyzer.registry.add_recognizer(numeric_otp_recognizer)
+            _analyzer.registry.add_recognizer(word_otp_recognizer)
+            
+        except Exception as e:
+            # If spaCy model is not found, provide helpful error
+            import sys
+            print(f"Error initializing Presidio Analyzer: {e}", file=sys.stderr)
+            print("Please run: uv run python -m spacy download en_core_web_lg", file=sys.stderr)
+            raise
+    return _analyzer
+
+def get_anonymizer():
+    """Get or create Presidio anonymizer engine."""
+    global _anonymizer
+    if _anonymizer is None:
+        _anonymizer = AnonymizerEngine()
+    return _anonymizer
+>>>>>>> fffbe16383ef9b1ec4c2ba5c42d1915c112b2c2e
 
 # Presidio Imports
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
@@ -109,6 +194,7 @@ def get_anonymizer():
 
 from datetime import datetime, timedelta, timezone
 import os
+import json
 
 # Load environment variables
 load_dotenv()
@@ -192,91 +278,6 @@ class Assistant(Agent):
             loan inquiries, and setting up alerts. Keep responses clear and professional."""
         )
 
-    def _sanitize_text(self, text: str) -> str:
-        """Helper to run Presidio Analyzer and Anonymizer on text."""
-        if not text or text.strip() == "":
-            return text
-            
-        # 1. Analyze (Detect PII)
-        # Include OTP and other sensitive entities
-        analyzer = get_analyzer()
-        results = analyzer.analyze(
-            text=text, 
-            entities=["OTP", "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "SSN", "IBAN_CODE", "US_DRIVER_LICENSE", "US_PASSPORT", "US_BANK_NUMBER"], 
-            language='en'
-        )
-        
-        # 2. Anonymize (Redact PII)
-        # You can customize operators: "replace", "mask", "redact", "hash"
-        anonymizer = get_anonymizer()
-        anonymized_result = anonymizer.anonymize(
-            text=text,
-            analyzer_results=results,
-            operators={"DEFAULT": OperatorConfig("replace", {"new_value": "[REDACTED]"})}
-        )
-        
-        if len(results) > 0:
-            logger.info(f"🛡️ Guardrail triggered. Redacted {len(results)} entities.")
-            
-        return anonymized_result.text
-    
-    def llm_node(
-        self, 
-        chat_ctx: llm.ChatContext, 
-        tools: list[llm.FunctionTool], 
-        model_settings: ModelSettings
-    ):
-        """
-        Intercepts User Input -> LLM.
-        Sanitizes the chat context so the LLM never sees the raw PII.
-        """
-        # Iterate through the context and sanitize the latest user message
-        # Note: ChatContext uses items property, not messages attribute
-        items = chat_ctx.items
-        if items:
-            # Find the last ChatMessage item
-            for item in reversed(items):
-                # Check if it's a ChatMessage (has 'type' attribute that equals 'message')
-                if hasattr(item, 'type') and item.type == 'message' and hasattr(item, 'role'):
-                    if item.role == "user":
-                        # Use text_content property to get all text content
-                        original_text = item.text_content
-                        if original_text:
-                            sanitized_text = self._sanitize_text(original_text)
-                            
-                            # Update the message content (replace first text content item)
-                            if isinstance(item.content, list) and len(item.content) > 0:
-                                # Replace the first text content with sanitized version
-                                for i, content in enumerate(item.content):
-                                    if isinstance(content, str):
-                                        item.content[i] = sanitized_text
-                                        break
-                            
-                            if original_text != sanitized_text:
-                                logger.info(f"Sanitized User Input: {original_text} -> {sanitized_text}")
-                    break
-
-        # Pass the sanitized context to the default LLM behavior
-        return super().llm_node(chat_ctx, tools, model_settings)
-    
-    def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings):
-        """
-        Intercepts LLM Output -> TTS.
-        Sanitizes the stream before the agent speaks it.
-        """
-        
-        # We define a generator to wrap the incoming text stream
-        async def safe_text_stream():
-            async for chunk in text:
-                # Note: Running Presidio on small chunks (tokens) is inaccurate.
-                # Ideally, you should buffer by sentence. 
-                # For this sample, we assume 'chunk' is substantial or we accept partial redaction risks.
-                # LiveKit's LLM stream usually yields chunks; a buffer might be needed for production accuracy.
-                sanitized_chunk = self._sanitize_text(chunk)
-                yield sanitized_chunk
-
-        # Pass the safe stream to the original TTS node logic
-        return super().tts_node(safe_text_stream(), model_settings)
 
 
 async def entrypoint(ctx: agents.JobContext):
@@ -293,7 +294,70 @@ async def entrypoint(ctx: agents.JobContext):
         user_id=default_user_id,
     )
     
-    session = AgentSession(
+    """
+    Entrypoint for LiveKit voice agent.
+    Initializes session with user identity from participant metadata.
+    """
+    room = ctx.room
+    room_name = room.name
+
+    # Extract user identity from participant metadata
+    user_id = None
+    email = None
+    roles = ["customer"]
+    permissions = ["read"]
+    platform = "web"
+
+    # Get the first remote participant (the user)
+    # In LiveKit, participants include both local and remote participants
+    for participant in room.remote_participants.values():
+        if participant.metadata:
+            try:
+                metadata = json.loads(participant.metadata)
+                user_id = metadata.get("user_id")
+                email = metadata.get("email")
+                roles = metadata.get("roles", ["customer"])
+                permissions = metadata.get("permissions", ["read"])
+                # Determine platform from metadata or participant name
+                platform = metadata.get("platform", "web")
+                break
+            except (json.JSONDecodeError, AttributeError) as e:
+                print(f"Error parsing participant metadata: {e}")
+                continue
+
+    # If no metadata found, try to extract from participant identity
+    # Fallback: use participant identity if it follows the pattern voice_assistant_user_{user_id}
+    if not user_id:
+        for participant in room.remote_participants.values():
+            identity = participant.identity
+            if identity and identity.startswith("voice_assistant_user_"):
+                user_id = identity.replace("voice_assistant_user_", "")
+                # Use default values if metadata not available
+                email = f"user_{user_id}@example.com"
+                break
+
+    # Initialize session in Redis if user_id is available
+    session_manager = get_session_manager()
+    if user_id:
+        try:
+            session_key = session_manager.create_session(
+                user_id=user_id,
+                email=email or f"user_{user_id}@example.com",
+                roles=roles if isinstance(roles, list) else [roles],
+                permissions=permissions if isinstance(permissions, list) else [permissions],
+                room_name=room_name,
+                platform=platform,
+            )
+            print(f"Session initialized: {session_key}")
+            print(f"User: {user_id} ({email}), Roles: {roles}, Permissions: {permissions}")
+        except Exception as e:
+            print(f"Warning: Could not create session: {e}")
+            print("Continuing without session management...")
+    else:
+        print("Warning: No user_id found in participant metadata. Session not created.")
+
+    # Create agent session
+    agent_session = AgentSession(
         stt="assemblyai/universal-streaming:en",
         llm="openai/gpt-4.1-mini",
         tts="cartesia/sonic-3:a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Male voice
@@ -303,13 +367,13 @@ async def entrypoint(ctx: agents.JobContext):
     )
 
     # Start the session
-    await session.start(
-        room=ctx.room,
+    await agent_session.start(
+        room=room,
         agent=Assistant()
     )
 
     # Generate initial greeting
-    await session.generate_reply(
+    await agent_session.generate_reply(
         instructions="Greet the user professionally as a banking assistant and ask for their customer ID to help with their banking needs."
     )
 
