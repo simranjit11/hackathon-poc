@@ -36,14 +36,14 @@ A real-time banking voice assistant enabling customers to interact with banking 
 ┌─────────────┐         ┌──────────────┐         ┌─────────────┐
 │   Client    │◄───────►│   LiveKit    │◄───────►│ Orchestrator│
 │ (Web/Mobile)│         │     SFU      │         │   (Python)   │
-└─────────────┘         └──────────────┘         └─────────────┘
-                                                          │
-                                                          ├──► STT Provider
-                                                          ├──► LLM (via Littellm)
-                                                          ├──► TTS Engine
-                                                          ├──► MCP Server
-                                                          ├──► Redis
-                                                          └──► Postgres
+└──────┬──────┘         └──────────────┘         └─────────────┘
+       │                                                │
+       │ Auth API                                      ├──► STT Provider
+       ▼                                                ├──► LLM (via Littellm)
+┌──────────────┐                                        ├──► TTS Engine
+│ Auth Server  │                                        ├──► MCP Server
+│ (Next.js API)│                                        ├──► Redis
+└──────────────┘                                        └──► Postgres
 ```
 
 ### Core Components
@@ -58,6 +58,7 @@ A real-time banking voice assistant enabling customers to interact with banking 
 | **MCP FastAPI Server** | Exposes hardened, JWT-authenticated banking tools; emits elicitation pauses when user validation is required | FastAPI (Python) |
 | **Datastores** | Redis holds active session/context, Postgres stores masked transcripts, tool logs, audit ledger; optional encrypted media storage | Redis, Postgres, Object Storage |
 | **TTS Engine** | Converts final JSON response to real-time speech streamed via LiveKit | Cartesia / ElevenLabs |
+| **Auth Server** | User authentication, JWT token generation and validation, biometric/2FA support | Next.js API Routes |
 | **Client Apps** | Render live transcript, elicitation prompts, confirmations; capture user input to resolve elicitation | Next.js (Web), React Native (Mobile) |
 
 ---
@@ -132,6 +133,29 @@ POST /mcp/alerts             # Manage alerts
 POST /mcp/elicitation/{id}/cancel  # Cancel elicitation
 ```
 
+### Auth Server (Next.js API Routes)
+
+**Responsibilities:**
+- User credential validation
+- JWT access token generation
+- Token validation and refresh
+- Biometric token validation (mobile)
+- 2FA OTP generation and verification (web)
+
+**Implementation:**
+- Integrated as Next.js API routes (not separate microservice)
+- Serves both web and mobile clients
+- CORS configured for mobile app access
+
+**Endpoints:**
+```
+POST /api/auth/login          # Authenticate user, issue JWT
+POST /api/auth/logout         # Invalidate session
+GET  /api/auth/me             # Validate token, return user info
+POST /api/auth/2fa/send       # Send OTP (web)
+POST /api/auth/2fa/verify     # Verify OTP (web)
+```
+
 ### Client Applications
 
 **Web Client (Next.js)**
@@ -140,12 +164,14 @@ POST /mcp/elicitation/{id}/cancel  # Cancel elicitation
 - Elicitation UI rendering
 - Data card visualization
 - Audio playback
+- Token storage (localStorage)
 
 **Mobile Client (React Native)**
 - LiveKit RN SDK integration
 - Biometric authentication
 - Native UI components
 - Platform-specific elicitation rendering
+- Token storage (AsyncStorage)
 
 ---
 
@@ -159,14 +185,76 @@ POST /mcp/elicitation/{id}/cancel  # Cancel elicitation
 ```
 User → Login Screen → Credentials + Biometric Auth
   ↓
-Auth Service validates → Returns Access Token + User Identity
+POST /api/auth/login
+Body: { email, password, biometricToken? }
+  ↓
+Next.js API Route validates credentials + biometric
+  ↓
+Returns: { accessToken, user: {...} }
+  ↓
+Mobile app stores token in AsyncStorage
 ```
 
 **Web:**
 ```
 User → Login Screen → Credentials + Optional 2FA
   ↓
-Auth Service validates → Returns Access Token + User Identity
+POST /api/auth/login
+Body: { email, password, otpCode? }
+  ↓
+Next.js API Route validates credentials + 2FA
+  ↓
+Returns: { accessToken, user: {...} }
+  ↓
+Web app stores token in localStorage
+```
+
+**Auth API Endpoint:** `POST /api/auth/login`
+
+**Request:**
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "biometricToken": "biometric_...",  // Optional, mobile only
+  "otpCode": "123456"                 // Optional, web only
+}
+```
+
+**Response:**
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "12345",
+    "email": "user@example.com",
+    "roles": ["customer"],
+    "permissions": ["read", "transact", "configure"]
+  }
+}
+```
+
+**Token Validation Endpoint:** `GET /api/auth/me`
+
+**Request:**
+```http
+GET /api/auth/me
+Authorization: Bearer <access_token>
+```
+
+**Response:**
+```json
+{
+  "user": {
+    "id": "12345",
+    "email": "user@example.com",
+    "roles": ["customer"],
+    "permissions": ["read", "transact", "configure"]
+  }
+}
 ```
 
 #### Phase 2: LiveKit Connection Setup
@@ -571,10 +659,11 @@ MCP Tool Resume
 ### Authentication Security
 
 **Token Management:**
-- Short-lived JWTs (5-15 minutes)
-- Refresh token rotation
-- Token revocation support
+- Short-lived JWTs (1 hour for access tokens)
+- Token validation on every API request
+- Token storage: localStorage (web), AsyncStorage (mobile)
 - Session freshness validation
+- Token revocation support (logout endpoint)
 
 **Biometric Security:**
 - Platform-native biometric APIs
@@ -749,8 +838,13 @@ Resume or Cancel Operations
 - Load balancing
 - Health checks
 
+**Auth Server:**
+- Next.js API routes (integrated with web app)
+- Same deployment as web client
+- CORS configured for mobile access
+
 **Client Applications:**
-- Web: Static hosting (Vercel/Netlify)
+- Web: Static hosting (Vercel/Netlify) + API routes
 - Mobile: App stores (iOS/Android)
 
 **Datastores:**
@@ -817,6 +911,93 @@ Resume or Cancel Operations
 {
   "type": "elicitation_cancel",
   "elicitation_id": "..."
+}
+```
+
+### Authentication API Endpoints
+
+**Login (Web & Mobile):**
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "biometricToken": "biometric_...",  // Optional, mobile only
+  "otpCode": "123456"                 // Optional, web only
+}
+```
+
+**Response:**
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "12345",
+    "email": "user@example.com",
+    "roles": ["customer"],
+    "permissions": ["read", "transact", "configure"]
+  }
+}
+```
+
+**Logout:**
+```http
+POST /api/auth/logout
+Authorization: Bearer <access_token>
+```
+
+**Token Validation:**
+```http
+GET /api/auth/me
+Authorization: Bearer <access_token>
+```
+
+**2FA Send OTP (Web):**
+```http
+POST /api/auth/2fa/send
+Content-Type: application/json
+
+{
+  "method": "sms" | "email",
+  "phoneOrEmail": "user@example.com"
+}
+```
+
+**2FA Verify OTP (Web):**
+```http
+POST /api/auth/2fa/verify
+Content-Type: application/json
+
+{
+  "code": "123456",
+  "sessionId": "session_uuid"
+}
+```
+
+### Connection Details API Endpoint
+
+**Get LiveKit Connection Details:**
+```http
+POST /api/connection-details
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "room_config": {
+    "agents": [{ "agent_name": "banking-assistant" }]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "serverUrl": "wss://livekit.example.com",
+  "roomName": "voice_assistant_room_1234567890_abc123",
+  "participantToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "participantName": "user"
 }
 ```
 

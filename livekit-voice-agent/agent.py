@@ -23,6 +23,7 @@ from livekit.agents import log as agents_log
 logger = agents_log.logger
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from session_manager import get_session_manager
 # Note: VoicePipelineAgent and AgentTranscriptionOptions are not available in current livekit-agents version
 # Transcription options may need to be configured differently
 
@@ -109,6 +110,7 @@ def get_anonymizer():
 
 from datetime import datetime
 import os
+import json
 
 # Load environment variables
 load_dotenv()
@@ -522,7 +524,70 @@ class Assistant(Agent):
 Rates are subject to change and based on creditworthiness. Contact us for personalized rates!"""        
 
 async def entrypoint(ctx: agents.JobContext):
-    session = AgentSession(
+    """
+    Entrypoint for LiveKit voice agent.
+    Initializes session with user identity from participant metadata.
+    """
+    room = ctx.room
+    room_name = room.name
+
+    # Extract user identity from participant metadata
+    user_id = None
+    email = None
+    roles = ["customer"]
+    permissions = ["read"]
+    platform = "web"
+
+    # Get the first remote participant (the user)
+    # In LiveKit, participants include both local and remote participants
+    for participant in room.remote_participants.values():
+        if participant.metadata:
+            try:
+                metadata = json.loads(participant.metadata)
+                user_id = metadata.get("user_id")
+                email = metadata.get("email")
+                roles = metadata.get("roles", ["customer"])
+                permissions = metadata.get("permissions", ["read"])
+                # Determine platform from metadata or participant name
+                platform = metadata.get("platform", "web")
+                break
+            except (json.JSONDecodeError, AttributeError) as e:
+                print(f"Error parsing participant metadata: {e}")
+                continue
+
+    # If no metadata found, try to extract from participant identity
+    # Fallback: use participant identity if it follows the pattern voice_assistant_user_{user_id}
+    if not user_id:
+        for participant in room.remote_participants.values():
+            identity = participant.identity
+            if identity and identity.startswith("voice_assistant_user_"):
+                user_id = identity.replace("voice_assistant_user_", "")
+                # Use default values if metadata not available
+                email = f"user_{user_id}@example.com"
+                break
+
+    # Initialize session in Redis if user_id is available
+    session_manager = get_session_manager()
+    if user_id:
+        try:
+            session_key = session_manager.create_session(
+                user_id=user_id,
+                email=email or f"user_{user_id}@example.com",
+                roles=roles if isinstance(roles, list) else [roles],
+                permissions=permissions if isinstance(permissions, list) else [permissions],
+                room_name=room_name,
+                platform=platform,
+            )
+            print(f"Session initialized: {session_key}")
+            print(f"User: {user_id} ({email}), Roles: {roles}, Permissions: {permissions}")
+        except Exception as e:
+            print(f"Warning: Could not create session: {e}")
+            print("Continuing without session management...")
+    else:
+        print("Warning: No user_id found in participant metadata. Session not created.")
+
+    # Create agent session
+    agent_session = AgentSession(
         stt="assemblyai/universal-streaming:en",
         llm="openai/gpt-4.1-mini",
         tts="cartesia/sonic-3:a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Male voice
@@ -531,13 +596,13 @@ async def entrypoint(ctx: agents.JobContext):
     )
 
     # Start the session
-    await session.start(
-        room=ctx.room,
+    await agent_session.start(
+        room=room,
         agent=Assistant()
     )
 
     # Generate initial greeting
-    await session.generate_reply(
+    await agent_session.generate_reply(
         instructions="Greet the user professionally as a banking assistant and ask for their customer ID to help with their banking needs."
     )
 
