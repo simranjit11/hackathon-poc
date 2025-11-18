@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Room, RoomEvent, TokenSource } from 'livekit-client';
 import { AppConfig } from '@/app-config';
 import { toastAlert } from '@/components/livekit/alert-toast';
+import { getAccessToken } from '@/lib/auth';
 
 export function useRoom(appConfig: AppConfig) {
   const aborted = useRef(false);
@@ -44,13 +45,22 @@ export function useRoom(appConfig: AppConfig) {
           window.location.origin
         );
 
+        // Get access token for authentication
+        const accessToken = getAccessToken();
+        const headers: HeadersInit = {
+          'Content-Type': 'application/json',
+          'X-Sandbox-Id': appConfig.sandboxId ?? '',
+        };
+
+        // Add Authorization header if access token is available
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+        }
+
         try {
           const res = await fetch(url.toString(), {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Sandbox-Id': appConfig.sandboxId ?? '',
-            },
+            headers,
             body: JSON.stringify({
               room_config: appConfig.agentName
                 ? {
@@ -59,9 +69,24 @@ export function useRoom(appConfig: AppConfig) {
                 : undefined,
             }),
           });
+
+          // Handle authentication errors
+          if (res.status === 401) {
+            const errorText = await res.text();
+            throw new Error(`Authentication failed: ${errorText}`);
+          }
+
+          if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`Failed to fetch connection details: ${errorText}`);
+          }
+
           return await res.json();
         } catch (error) {
           console.error('Error fetching connection details:', error);
+          if (error instanceof Error) {
+            throw error;
+          }
           throw new Error('Error fetching connection details!');
         }
       }),
