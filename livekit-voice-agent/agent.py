@@ -26,171 +26,6 @@ from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from session_manager import get_session_manager
-# Note: VoicePipelineAgent and AgentTranscriptionOptions are not available in current livekit-agents version
-# Transcription options may need to be configured differently
-
-# Presidio Imports
-from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
-from presidio_anonymizer import AnonymizerEngine
-from presidio_anonymizer.entities import OperatorConfig
-import re
-
-# Initialize Presidio Engines lazily (only when needed)
-# This avoids proxy/network issues during import
-_analyzer = None
-_anonymizer = None
-
-def get_analyzer():
-    """Get or create Presidio analyzer engine with custom OTP recognizer."""
-    global _analyzer
-    if _analyzer is None:
-        try:
-            #Create base analyzer
-            _analyzer = AnalyzerEngine()
-            
-            # Add custom OTP recognizer
-            # Pattern 1: Numeric OTPs (4-8 digits, optionally with spaces/dashes)
-            numeric_otp_pattern = r'\b\d{4,8}\b|\b\d{3,4}[-\s]\d{3,4}\b'
-            
-            # Pattern 2: Word-based OTPs (e.g., "one two three four five")
-            # Match sequences of number words (3-8 words) - basic number words only
-            otp_words = r'(?:one|two|three|four|five|six|seven|eight|nine|zero)'
-            # Match 3-8 consecutive number words - this is the core OTP value pattern
-            otp_value_only = rf'\b(?:{otp_words}\s+){{2,7}}{otp_words}\b'
-            
-            # Pattern 3: OTP with context - matches the full phrase but we'll extract just the value
-            # This helps with context scoring but the actual match should be the value part
-            otp_with_context_full = rf'\b(?:my|the|your)?(?:otp|code|pin|password|passcode|verification\s+code)\s+is\s+((?:{otp_words}\s+){{2,7}}{otp_words})\b'
-            
-            # Create recognizers for different patterns
-            numeric_otp_recognizer = PatternRecognizer(
-                supported_entity="OTP",
-                patterns=[
-                    Pattern(
-                        name="numeric_otp",
-                        regex=numeric_otp_pattern,
-                        score=0.8
-                    )
-                ],
-                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "verification"]
-            )
-            
-            # Primary recognizer for word-based OTP values
-            # This matches just the number words sequence (e.g., "one two three four five")
-            word_otp_recognizer = PatternRecognizer(
-                supported_entity="OTP",
-                patterns=[
-                    Pattern(
-                        name="otp_value_only",
-                        regex=otp_value_only,
-                        score=0.8
-                    )
-                ],
-                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "my", "the", "your", "is"],
-                # Increase context score when OTP-related words are nearby
-                supported_language="en"
-            )
-            
-            # Add both recognizers
-            _analyzer.registry.add_recognizer(numeric_otp_recognizer)
-            _analyzer.registry.add_recognizer(word_otp_recognizer)
-            
-        except Exception as e:
-            # If spaCy model is not found, provide helpful error
-            import sys
-            print(f"Error initializing Presidio Analyzer: {e}", file=sys.stderr)
-            print("Please run: uv run python -m spacy download en_core_web_lg", file=sys.stderr)
-            raise
-    return _analyzer
-
-def get_anonymizer():
-    """Get or create Presidio anonymizer engine."""
-    global _anonymizer
-    if _anonymizer is None:
-        _anonymizer = AnonymizerEngine()
-    return _anonymizer
->>>>>>> fffbe16383ef9b1ec4c2ba5c42d1915c112b2c2e
-
-# Presidio Imports
-from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
-from presidio_anonymizer import AnonymizerEngine
-from presidio_anonymizer.entities import OperatorConfig
-import re
-
-# Initialize Presidio Engines lazily (only when needed)
-# This avoids proxy/network issues during import
-_analyzer = None
-_anonymizer = None
-
-def get_analyzer():
-    """Get or create Presidio analyzer engine with custom OTP recognizer."""
-    global _analyzer
-    if _analyzer is None:
-        try:
-            #Create base analyzer
-            _analyzer = AnalyzerEngine()
-            
-            # Add custom OTP recognizer
-            # Pattern 1: Numeric OTPs (4-8 digits, optionally with spaces/dashes)
-            numeric_otp_pattern = r'\b\d{4,8}\b|\b\d{3,4}[-\s]\d{3,4}\b'
-            
-            # Pattern 2: Word-based OTPs (e.g., "one two three four five")
-            # Match sequences of number words (3-8 words) - basic number words only
-            otp_words = r'(?:one|two|three|four|five|six|seven|eight|nine|zero)'
-            # Match 3-8 consecutive number words - this is the core OTP value pattern
-            otp_value_only = rf'\b(?:{otp_words}\s+){{2,7}}{otp_words}\b'
-            
-            # Pattern 3: OTP with context - matches the full phrase but we'll extract just the value
-            # This helps with context scoring but the actual match should be the value part
-            otp_with_context_full = rf'\b(?:my|the|your)?(?:otp|code|pin|password|passcode|verification\s+code)\s+is\s+((?:{otp_words}\s+){{2,7}}{otp_words})\b'
-            
-            # Create recognizers for different patterns
-            numeric_otp_recognizer = PatternRecognizer(
-                supported_entity="OTP",
-                patterns=[
-                    Pattern(
-                        name="numeric_otp",
-                        regex=numeric_otp_pattern,
-                        score=0.8
-                    )
-                ],
-                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "verification"]
-            )
-            
-            # Primary recognizer for word-based OTP values
-            # This matches just the number words sequence (e.g., "one two three four five")
-            word_otp_recognizer = PatternRecognizer(
-                supported_entity="OTP",
-                patterns=[
-                    Pattern(
-                        name="otp_value_only",
-                        regex=otp_value_only,
-                        score=0.8
-                    )
-                ],
-                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "my", "the", "your", "is"],
-                # Increase context score when OTP-related words are nearby
-                supported_language="en"
-            )
-            
-            # Add both recognizers
-            _analyzer.registry.add_recognizer(numeric_otp_recognizer)
-            _analyzer.registry.add_recognizer(word_otp_recognizer)
-            
-        except Exception as e:
-            # If spaCy model is not found, provide helpful error
-            import sys
-            print(f"Error initializing Presidio Analyzer: {e}", file=sys.stderr)
-            print("Please run: uv run python -m spacy download en_core_web_lg", file=sys.stderr)
-            raise
-    return _analyzer
-
-def get_anonymizer():
-    """Get or create Presidio anonymizer engine."""
-    global _anonymizer
-    if _anonymizer is None:
-        _anonymizer = AnonymizerEngine()
-    return _anonymizer
 
 from datetime import datetime, timedelta, timezone
 import os
@@ -281,19 +116,6 @@ class Assistant(Agent):
 
 
 async def entrypoint(ctx: agents.JobContext):
-    # Get MCP server URL from environment or use default
-    mcp_server_url = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
-    
-    # For now, use a default user_id - in production, extract from room/participant
-    # TODO: Extract user_id from room participant metadata or JWT token
-    default_user_id = os.getenv("DEFAULT_USER_ID", "12345")
-    
-    # Create JWT-authenticated MCP server
-    mcp_server = JWTAuthenticatedMCPServer(
-        url=mcp_server_url,
-        user_id=default_user_id,
-    )
-    
     """
     Entrypoint for LiveKit voice agent.
     Initializes session with user identity from participant metadata.
@@ -313,16 +135,22 @@ async def entrypoint(ctx: agents.JobContext):
     for participant in room.remote_participants.values():
         if participant.metadata:
             try:
-                metadata = json.loads(participant.metadata)
-                user_id = metadata.get("user_id")
-                email = metadata.get("email")
-                roles = metadata.get("roles", ["customer"])
-                permissions = metadata.get("permissions", ["read"])
-                # Determine platform from metadata or participant name
-                platform = metadata.get("platform", "web")
-                break
-            except (json.JSONDecodeError, AttributeError) as e:
-                print(f"Error parsing participant metadata: {e}")
+                # Check if metadata is a string (not a MagicMock in console mode)
+                if isinstance(participant.metadata, str):
+                    metadata = json.loads(participant.metadata)
+                    user_id = metadata.get("user_id")
+                    email = metadata.get("email")
+                    roles = metadata.get("roles", ["customer"])
+                    permissions = metadata.get("permissions", ["read"])
+                    # Determine platform from metadata or participant name
+                    platform = metadata.get("platform", "web")
+                    break
+                else:
+                    # In console mode, metadata might be a MagicMock - skip it
+                    logger.debug(f"Skipping non-string metadata: {type(participant.metadata)}")
+                    continue
+            except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                logger.debug(f"Error parsing participant metadata: {e}")
                 continue
 
     # If no metadata found, try to extract from participant identity
@@ -330,11 +158,27 @@ async def entrypoint(ctx: agents.JobContext):
     if not user_id:
         for participant in room.remote_participants.values():
             identity = participant.identity
-            if identity and identity.startswith("voice_assistant_user_"):
+            # Check if identity is a string (not a MagicMock)
+            if isinstance(identity, str) and identity.startswith("voice_assistant_user_"):
                 user_id = identity.replace("voice_assistant_user_", "")
                 # Use default values if metadata not available
                 email = f"user_{user_id}@example.com"
                 break
+
+    # Final fallback: use environment variable or default for console mode
+    if not user_id:
+        user_id = os.getenv("DEFAULT_USER_ID", "12345")
+        email = f"user_{user_id}@example.com"
+        logger.info(f"Using default user_id from environment: {user_id}")
+
+    # Get MCP server URL from environment or use default
+    mcp_server_url = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
+    
+    # Create JWT-authenticated MCP server with the extracted user_id
+    mcp_server = JWTAuthenticatedMCPServer(
+        url=mcp_server_url,
+        user_id=user_id,
+    )
 
     # Initialize session in Redis if user_id is available
     session_manager = get_session_manager()
