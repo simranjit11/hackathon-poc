@@ -5,13 +5,107 @@ The simplest possible LiveKit voice agent to get you started.
 Requires only OpenAI and Deepgram API keys.
 """
 
-from typing import Any
+from typing import Any, AsyncIterable
 from dotenv import load_dotenv
 from livekit import agents
-from livekit.agents import Agent, AgentSession, RunContext
+from livekit.agents import (
+    AutoSubscribe,
+    JobContext,
+    JobProcess,
+    WorkerOptions,
+    cli,
+    llm,
+)
+from livekit.agents import Agent, AgentSession, RunContext, ModelSettings
 from livekit.agents.llm import function_tool
+from livekit.agents import log as agents_log
+
+logger = agents_log.logger
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+# Note: VoicePipelineAgent and AgentTranscriptionOptions are not available in current livekit-agents version
+# Transcription options may need to be configured differently
+
+# Presidio Imports
+from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
+import re
+
+# Initialize Presidio Engines lazily (only when needed)
+# This avoids proxy/network issues during import
+_analyzer = None
+_anonymizer = None
+
+def get_analyzer():
+    """Get or create Presidio analyzer engine with custom OTP recognizer."""
+    global _analyzer
+    if _analyzer is None:
+        try:
+            #Create base analyzer
+            _analyzer = AnalyzerEngine()
+            
+            # Add custom OTP recognizer
+            # Pattern 1: Numeric OTPs (4-8 digits, optionally with spaces/dashes)
+            numeric_otp_pattern = r'\b\d{4,8}\b|\b\d{3,4}[-\s]\d{3,4}\b'
+            
+            # Pattern 2: Word-based OTPs (e.g., "one two three four five")
+            # Match sequences of number words (3-8 words) - basic number words only
+            otp_words = r'(?:one|two|three|four|five|six|seven|eight|nine|zero)'
+            # Match 3-8 consecutive number words - this is the core OTP value pattern
+            otp_value_only = rf'\b(?:{otp_words}\s+){{2,7}}{otp_words}\b'
+            
+            # Pattern 3: OTP with context - matches the full phrase but we'll extract just the value
+            # This helps with context scoring but the actual match should be the value part
+            otp_with_context_full = rf'\b(?:my|the|your)?(?:otp|code|pin|password|passcode|verification\s+code)\s+is\s+((?:{otp_words}\s+){{2,7}}{otp_words})\b'
+            
+            # Create recognizers for different patterns
+            numeric_otp_recognizer = PatternRecognizer(
+                supported_entity="OTP",
+                patterns=[
+                    Pattern(
+                        name="numeric_otp",
+                        regex=numeric_otp_pattern,
+                        score=0.8
+                    )
+                ],
+                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "verification"]
+            )
+            
+            # Primary recognizer for word-based OTP values
+            # This matches just the number words sequence (e.g., "one two three four five")
+            word_otp_recognizer = PatternRecognizer(
+                supported_entity="OTP",
+                patterns=[
+                    Pattern(
+                        name="otp_value_only",
+                        regex=otp_value_only,
+                        score=0.8
+                    )
+                ],
+                context=["otp", "code", "pin", "password", "passcode", "verification code", "one-time password", "my", "the", "your", "is"],
+                # Increase context score when OTP-related words are nearby
+                supported_language="en"
+            )
+            
+            # Add both recognizers
+            _analyzer.registry.add_recognizer(numeric_otp_recognizer)
+            _analyzer.registry.add_recognizer(word_otp_recognizer)
+            
+        except Exception as e:
+            # If spaCy model is not found, provide helpful error
+            import sys
+            print(f"Error initializing Presidio Analyzer: {e}", file=sys.stderr)
+            print("Please run: uv run python -m spacy download en_core_web_lg", file=sys.stderr)
+            raise
+    return _analyzer
+
+def get_anonymizer():
+    """Get or create Presidio anonymizer engine."""
+    global _anonymizer
+    if _anonymizer is None:
+        _anonymizer = AnonymizerEngine()
+    return _anonymizer
 
 from datetime import datetime
 import os
@@ -85,6 +179,92 @@ class Assistant(Agent):
             ]
         }
 
+    def _sanitize_text(self, text: str) -> str:
+        """Helper to run Presidio Analyzer and Anonymizer on text."""
+        if not text or text.strip() == "":
+            return text
+            
+        # 1. Analyze (Detect PII)
+        # Include OTP and other sensitive entities
+        analyzer = get_analyzer()
+        results = analyzer.analyze(
+            text=text, 
+            entities=["OTP", "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "SSN", "IBAN_CODE", "US_DRIVER_LICENSE", "US_PASSPORT", "US_BANK_NUMBER"], 
+            language='en'
+        )
+        
+        # 2. Anonymize (Redact PII)
+        # You can customize operators: "replace", "mask", "redact", "hash"
+        anonymizer = get_anonymizer()
+        anonymized_result = anonymizer.anonymize(
+            text=text,
+            analyzer_results=results,
+            operators={"DEFAULT": OperatorConfig("replace", {"new_value": "[REDACTED]"})}
+        )
+        
+        if len(results) > 0:
+            logger.info(f"🛡️ Guardrail triggered. Redacted {len(results)} entities.")
+            
+        return anonymized_result.text
+    
+    def llm_node(
+        self, 
+        chat_ctx: llm.ChatContext, 
+        tools: list[llm.FunctionTool], 
+        model_settings: ModelSettings
+    ):
+        """
+        Intercepts User Input -> LLM.
+        Sanitizes the chat context so the LLM never sees the raw PII.
+        """
+        # Iterate through the context and sanitize the latest user message
+        # Note: ChatContext uses items property, not messages attribute
+        items = chat_ctx.items
+        if items:
+            # Find the last ChatMessage item
+            for item in reversed(items):
+                # Check if it's a ChatMessage (has 'type' attribute that equals 'message')
+                if hasattr(item, 'type') and item.type == 'message' and hasattr(item, 'role'):
+                    if item.role == "user":
+                        # Use text_content property to get all text content
+                        original_text = item.text_content
+                        if original_text:
+                            sanitized_text = self._sanitize_text(original_text)
+                            
+                            # Update the message content (replace first text content item)
+                            if isinstance(item.content, list) and len(item.content) > 0:
+                                # Replace the first text content with sanitized version
+                                for i, content in enumerate(item.content):
+                                    if isinstance(content, str):
+                                        item.content[i] = sanitized_text
+                                        break
+                            
+                            if original_text != sanitized_text:
+                                logger.info(f"Sanitized User Input: {original_text} -> {sanitized_text}")
+                    break
+
+        # Pass the sanitized context to the default LLM behavior
+        return super().llm_node(chat_ctx, tools, model_settings)
+    
+    def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings):
+        """
+        Intercepts LLM Output -> TTS.
+        Sanitizes the stream before the agent speaks it.
+        """
+        
+        # We define a generator to wrap the incoming text stream
+        async def safe_text_stream():
+            async for chunk in text:
+                # Note: Running Presidio on small chunks (tokens) is inaccurate.
+                # Ideally, you should buffer by sentence. 
+                # For this sample, we assume 'chunk' is substantial or we accept partial redaction risks.
+                # LiveKit's LLM stream usually yields chunks; a buffer might be needed for production accuracy.
+                sanitized_chunk = self._sanitize_text(chunk)
+                yield sanitized_chunk
+
+        # Pass the safe stream to the original TTS node logic
+        return super().tts_node(safe_text_stream(), model_settings)
+        
     @function_tool
     async def get_current_date_and_time(self, context: RunContext) -> str:
         """Get the current date and time."""
