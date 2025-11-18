@@ -5,7 +5,7 @@ The simplest possible LiveKit voice agent to get you started.
 Requires only OpenAI and Deepgram API keys.
 """
 
-from typing import Any, AsyncIterable
+from typing import Any, AsyncIterable, Optional
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import (
@@ -16,16 +16,16 @@ from livekit.agents import (
     cli,
     llm,
 )
-from livekit.agents import Agent, AgentSession, RunContext, ModelSettings
-from livekit.agents.llm import function_tool, mcp
-
+from livekit.agents import Agent, AgentSession, ModelSettings
 from livekit.agents import log as agents_log
 
 logger = agents_log.logger
 from livekit.plugins import silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
-
 from session_manager import get_session_manager
+from mcp_client import get_mcp_client
+from agno_tools import create_agno_mcp_tools
+from agno import Agent as AgnoAgent
+from agno.models.openai import OpenAIChat
 
 from datetime import datetime, timedelta, timezone
 import os
@@ -112,8 +112,154 @@ class Assistant(Agent):
             You can help customers with account balances, payments, transfers, transaction history,
             loan inquiries, and setting up alerts. Keep responses clear and professional."""
         )
+        
+        # MCP client for calling banking tools
+        self.mcp_client = get_mcp_client()
+        
+        # Store user_id and session_id for MCP calls
+        # These will be set when the agent session starts
+        self.user_id: Optional[str] = None
+        self.session_id: Optional[str] = None
+        
+        # Agno agent will be initialized when user context is available
+        self.agno_agent: Optional[AgnoAgent] = None
 
+    def _sanitize_text(self, text: str) -> str:
+        """Helper to run Presidio Analyzer and Anonymizer on text."""
+        if not text or text.strip() == "":
+            return text
+            
+        # 1. Analyze (Detect PII)
+        # Include OTP and other sensitive entities
+        analyzer = get_analyzer()
+        results = analyzer.analyze(
+            text=text, 
+            entities=["OTP", "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "SSN", "IBAN_CODE", "US_DRIVER_LICENSE", "US_PASSPORT", "US_BANK_NUMBER"], 
+            language='en'
+        )
+        
+        # 2. Anonymize (Redact PII)
+        # You can customize operators: "replace", "mask", "redact", "hash"
+        anonymizer = get_anonymizer()
+        anonymized_result = anonymizer.anonymize(
+            text=text,
+            analyzer_results=results,
+            operators={"DEFAULT": OperatorConfig("replace", {"new_value": "[REDACTED]"})}
+        )
+        
+        if len(results) > 0:
+            logger.info(f"🛡️ Guardrail triggered. Redacted {len(results)} entities.")
+            
+        return anonymized_result.text
+    
+    def _initialize_agno_agent(self):
+        """Initialize Agno agent with MCP server tools when user context is available."""
+        if self.agno_agent is None and self.user_id and self.session_id:
+            # Create MCP tools - Agno will automatically discover tools from MCP server
+            mcp_tools = create_agno_mcp_tools(self.user_id, self.session_id)
+            
+            # Initialize Agno agent with OpenAI model and MCP tools
+            # Agno automatically discovers and uses tools from MCP server
+            self.agno_agent = AgnoAgent(
+                name="banking_assistant",
+                model=OpenAIChat(
+                    id="gpt-4o-mini",
+                    name="GPT-4o Mini",
+                ),
+                tools=[mcp_tools],  # MCP server tools are automatically discovered
+                instructions="""You are a helpful and professional banking voice assistant.
+                You can help customers with account balances, payments, transfers, transaction history,
+                loan inquiries, and setting up alerts. Keep responses clear and professional.
+                Use the available tools from the MCP server to perform banking operations automatically when needed.""",
+                markdown=True,
+            )
+            logger.info(f"Initialized Agno agent with MCP server tools (auto-discovered) for user_id: {self.user_id}")
+    
+    async def llm_node(
+        self, 
+        chat_ctx: llm.ChatContext, 
+        tools: list[llm.FunctionTool], 
+        model_settings: ModelSettings
+    ):
+        """
+        Intercepts User Input -> LLM using Agno framework.
+        Sanitizes the chat context so the LLM never sees the raw PII.
+        Agno automatically handles tool calling based on tool definitions.
+        """
+        # Ensure Agno agent is initialized
+        self._initialize_agno_agent()
+        
+        if not self.agno_agent:
+            # Fallback to default if Agno not initialized
+            logger.warning("Agno agent not initialized, falling back to default LLM")
+            return super().llm_node(chat_ctx, tools, model_settings)
+        
+        # Extract user message from LiveKit context
+        user_message = None
+        items = chat_ctx.items
+        if items:
+            # Find the last user message
+            for item in reversed(items):
+                if hasattr(item, 'type') and item.type == 'message' and hasattr(item, 'role'):
+                    if item.role == "user":
+                        user_message = item.text_content
+                        if user_message:
+                            # Sanitize PII before sending to Agno
+                            user_message = self._sanitize_text(user_message)
+                            if user_message != item.text_content:
+                                logger.info(f"Sanitized User Input before Agno: {item.text_content[:50]}... -> {user_message[:50]}...")
+                        break
+        
+        if not user_message:
+            # No user message, return default behavior
+            return super().llm_node(chat_ctx, tools, model_settings)
+        
+        # Run Agno agent with user message
+        # Agno will automatically call MCP tools as needed
+        try:
+            response = self.agno_agent.run(user_message)
+            
+            # Convert Agno response to LiveKit streaming format
+            # Agno returns a RunResponse object with content
+            response_text = response.content if hasattr(response, 'content') else str(response)
+            
+            # Stream the response back as async generator
+            async def agno_response_stream():
+                # Yield response in chunks to simulate streaming
+                chunk_size = 50
+                for i in range(0, len(response_text), chunk_size):
+                    chunk = response_text[i:i + chunk_size]
+                    # Sanitize output before streaming
+                    sanitized_chunk = self._sanitize_text(chunk)
+                    yield sanitized_chunk
+            
+            # Return the stream
+            return agno_response_stream()
+            
+        except Exception as e:
+            logger.error(f"Error in Agno LLM node: {e}")
+            # Fallback to default on error
+            return super().llm_node(chat_ctx, tools, model_settings)
+    
+    def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings):
+        """
+        Intercepts LLM Output -> TTS.
+        Sanitizes the stream before the agent speaks it.
+        """
+        
+        # We define a generator to wrap the incoming text stream
+        async def safe_text_stream():
+            async for chunk in text:
+                # Note: Running Presidio on small chunks (tokens) is inaccurate.
+                # Ideally, you should buffer by sentence. 
+                # For this sample, we assume 'chunk' is substantial or we accept partial redaction risks.
+                # LiveKit's LLM stream usually yields chunks; a buffer might be needed for production accuracy.
+                sanitized_chunk = self._sanitize_text(chunk)
+                yield sanitized_chunk
 
+        # Pass the safe stream to the original TTS node logic
+        return super().tts_node(safe_text_stream(), model_settings)
+        
 
 async def entrypoint(ctx: agents.JobContext):
     """
@@ -200,20 +346,30 @@ async def entrypoint(ctx: agents.JobContext):
     else:
         print("Warning: No user_id found in participant metadata. Session not created.")
 
+    # Create agent instance
+    assistant = Assistant()
+    
+    # Set user context for MCP calls
+    if user_id:
+        assistant.user_id = user_id
+        assistant.session_id = room_name
+        logger.info(f"Set agent context: user_id={user_id}, session_id={room_name}")
+
     # Create agent session
+    # Note: Using VAD (Voice Activity Detection) for turn detection instead of MultilingualModel
+    # VAD handles voice activity without requiring model downloads
     agent_session = AgentSession(
         stt="assemblyai/universal-streaming:en",
         llm="openai/gpt-4.1-mini",
         tts="cartesia/sonic-3:a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Male voice
         vad=silero.VAD.load(),
-        turn_detection=MultilingualModel(),
-        mcp_servers=[mcp_server],  # Let AgentSession handle MCP integration!
+        # turn_detection removed - VAD handles voice activity detection without model downloads
     )
 
     # Start the session
     await agent_session.start(
         room=room,
-        agent=Assistant()
+        agent=assistant
     )
 
     # Generate initial greeting

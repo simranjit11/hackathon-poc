@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(name="Banking Tools Server")
 
 
-def get_user_from_headers() -> User:
+def get_user_from_token(jwt_token: str, required_scope: str = "read") -> User:
     """
     Extract and validate user from JWT token in HTTP headers.
     
@@ -35,6 +35,10 @@ def get_user_from_headers() -> User:
     1. Authorization header: "Bearer <token>"
     2. X-JWT-Token header: "<token>"
     
+    Args:
+        jwt_token: JWT token string
+        required_scope: Required scope (default: "read")
+        
     Returns:
         User object with user_id and scopes
         
@@ -62,8 +66,8 @@ def get_user_from_headers() -> User:
     user_id = payload.get("sub")
     scopes = payload.get("scopes", [])
     
-    if "read" not in scopes:
-        raise ValueError("Missing required 'read' scope")
+    if required_scope not in scopes:
+        raise ValueError(f"Missing required '{required_scope}' scope")
     
     return User(user_id=user_id, scopes=scopes)
 
@@ -295,6 +299,322 @@ async def get_loans() -> List[dict]:
     except Exception as e:
         logger.error(f"Error retrieving loans: {e}")
         raise ValueError(f"Failed to retrieve loan information: {str(e)}")
+
+
+@mcp.tool()
+async def make_payment(
+    jwt_token: str,
+    from_account: str,
+    to_account: str,
+    amount: float,
+    description: str = ""
+) -> dict:
+    """
+    Make a payment or transfer between accounts.
+    
+    Args:
+        jwt_token: JWT authentication token with 'transact' scope
+        from_account: Source account type ('checking', 'savings')
+        to_account: Destination account or payee name
+        amount: Amount to transfer
+        description: Optional description for the transaction
+        
+    Returns:
+        Payment confirmation with details
+    """
+    logger.info("Payment request received")
+    
+    try:
+        # Authenticate user with transact scope
+        user = get_user_from_token(jwt_token, required_scope="transact")
+        logger.info(
+            f"Payment request for user_id: {user.user_id}, "
+            f"from: {from_account}, to: {to_account}, amount: {amount}"
+        )
+        
+        # Query banking API
+        banking_api = BankingAPI()
+        result = await banking_api.make_payment(
+            user.user_id,
+            from_account,
+            to_account,
+            amount,
+            description
+        )
+        
+        logger.info(
+            f"Payment successful for user_id: {user.user_id}, "
+            f"confirmation: {result['confirmation_number']}"
+        )
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Payment error: {e}")
+        raise ValueError(f"Payment failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error processing payment: {e}")
+        raise ValueError(f"Failed to process payment: {str(e)}")
+
+
+@mcp.tool()
+async def get_credit_limit(jwt_token: str) -> dict:
+    """
+    Get credit card limits and available credit for the authenticated user.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
+        
+    Returns:
+        Credit card information with limits and utilization
+    """
+    logger.info("Credit limit request received")
+    
+    try:
+        # Authenticate user
+        user = get_user_from_token(jwt_token)
+        logger.info(f"Credit limit request for user_id: {user.user_id}")
+        
+        # Get balances (specifically credit card)
+        banking_api = BankingAPI()
+        accounts = await banking_api.get_accounts(user.user_id)
+        
+        # Find credit card account
+        credit_card = None
+        for account in accounts:
+            if account.get("type") == "credit_card":
+                credit_card = account
+                break
+        
+        if not credit_card:
+            customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
+            return {
+                "has_credit_card": False,
+                "message": f"Hello {customer_name}! You don't have a credit card account with us."
+            }
+        
+        balance = credit_card.get("balance", 0.0)
+        limit = credit_card.get("limit", 0.0)
+        available_credit = limit - balance
+        utilization = (balance / limit * 100) if limit > 0 else 0
+        
+        result = {
+            "has_credit_card": True,
+            "credit_limit": limit,
+            "current_balance": balance,
+            "available_credit": available_credit,
+            "credit_utilization_percent": round(utilization, 1),
+            "account_number": mask_account_number(credit_card.get("account_number", ""))
+        }
+        
+        logger.info(
+            f"Credit limit retrieved for user_id: {user.user_id}, "
+            f"utilization: {utilization:.1f}%"
+        )
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving credit limit: {e}")
+        raise ValueError(f"Failed to retrieve credit limit: {str(e)}")
+
+
+@mcp.tool()
+async def set_alert(
+    jwt_token: str,
+    alert_type: str,
+    description: str,
+    due_date: str = ""
+) -> dict:
+    """
+    Set up payment reminders or alerts.
+    
+    Args:
+        jwt_token: JWT authentication token with 'configure' scope
+        alert_type: Type of alert ('payment', 'low_balance', 'large_transaction')
+        description: Description of the alert
+        due_date: Optional due date for payment reminders (YYYY-MM-DD)
+        
+    Returns:
+        Alert confirmation
+    """
+    logger.info("Set alert request received")
+    
+    try:
+        # Authenticate user with configure scope
+        user = get_user_from_token(jwt_token, required_scope="configure")
+        logger.info(
+            f"Set alert request for user_id: {user.user_id}, "
+            f"type: {alert_type}"
+        )
+        
+        # Query banking API
+        banking_api = BankingAPI()
+        alert = await banking_api.set_alert(
+            user.user_id,
+            alert_type,
+            description,
+            due_date if due_date else None
+        )
+        
+        customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
+        
+        result = {
+            "success": True,
+            "customer_name": customer_name,
+            "alert": alert,
+            "message": f"Reminder set successfully for {customer_name}!"
+        }
+        
+        logger.info(f"Alert set for user_id: {user.user_id}, type: {alert_type}")
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error setting alert: {e}")
+        raise ValueError(f"Failed to set alert: {str(e)}")
+
+
+@mcp.tool()
+async def get_alerts(jwt_token: str) -> List[dict]:
+    """
+    Get active payment alerts and reminders for the authenticated user.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
+        
+    Returns:
+        List of active alerts
+    """
+    logger.info("Get alerts request received")
+    
+    try:
+        # Authenticate user
+        user = get_user_from_token(jwt_token)
+        logger.info(f"Get alerts request for user_id: {user.user_id}")
+        
+        # Query banking API
+        banking_api = BankingAPI()
+        alerts = await banking_api.get_alerts(user.user_id)
+        customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
+        
+        if not alerts:
+            return [{
+                "customer_name": customer_name,
+                "has_alerts": False,
+                "message": f"Hello {customer_name}! You have no active alerts or reminders set up."
+            }]
+        
+        # Format alerts
+        result = []
+        for alert in alerts:
+            status = "🟢 Active" if alert.get("active", False) else "🔴 Inactive"
+            result.append({
+                "customer_name": customer_name,
+                "has_alerts": True,
+                "type": alert.get("type", ""),
+                "description": alert.get("description", ""),
+                "status": status,
+                "created_at": alert.get("created_at", "")
+            })
+        
+        logger.info(
+            f"Alerts retrieved for user_id: {user.user_id}, "
+            f"count: {len(result)}"
+        )
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving alerts: {e}")
+        raise ValueError(f"Failed to retrieve alerts: {str(e)}")
+
+
+@mcp.tool()
+async def get_interest_rates(jwt_token: str) -> str:
+    """
+    Get current interest rates for various banking products.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
+        
+    Returns:
+        Formatted string with interest rates
+    """
+    logger.info("Interest rates request received")
+    
+    try:
+        # Authenticate user
+        user = get_user_from_token(jwt_token)
+        logger.info(f"Interest rates request for user_id: {user.user_id}")
+        
+        # Return static interest rates (mock data)
+        return """Current Interest Rates (as of November 2025):
+
+💰 DEPOSIT ACCOUNTS:
+• Checking Account: 0.10% APY
+• Savings Account: 4.25% APY
+• Money Market: 4.50% APY
+• 12-Month CD: 5.00% APY
+• 24-Month CD: 4.75% APY
+
+💳 CREDIT PRODUCTS:
+• Credit Cards: 15.99% - 24.99% APR
+• Personal Loans: 5.99% - 18.99% APR
+• Auto Loans: 3.49% - 8.99% APR
+• Home Equity Line: 7.25% - 9.50% APR
+
+🏠 MORTGAGE RATES:
+• 30-Year Fixed: 7.125% APR
+• 15-Year Fixed: 6.625% APR
+• 5/1 ARM: 6.250% APR
+
+Rates are subject to change and based on creditworthiness. Contact us for personalized rates!"""
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving interest rates: {e}")
+        raise ValueError(f"Failed to retrieve interest rates: {str(e)}")
+
+
+@mcp.tool()
+async def get_current_date_time(jwt_token: str) -> str:
+    """
+    Get the current date and time.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
+        
+    Returns:
+        Formatted current date and time string
+    """
+    logger.info("Date/time request received")
+    
+    try:
+        # Authenticate user
+        user = get_user_from_token(jwt_token)
+        
+        from datetime import datetime
+        current_datetime = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        return f"The current date and time is {current_datetime}"
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving date/time: {e}")
+        raise ValueError(f"Failed to retrieve date/time: {str(e)}")
 
 
 if __name__ == "__main__":
