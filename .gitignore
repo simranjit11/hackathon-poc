@@ -167,6 +167,3 @@ coverage/
 # Project specific
 mcp-server/.env
 mcp-server/venv/*
-
-mcp-server/.env
-mcp-server/venv/*
