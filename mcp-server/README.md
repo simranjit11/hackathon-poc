@@ -136,17 +136,19 @@ See `schema.sql` for the complete schema definition and sample data.
 Get account balances for the authenticated user.
 
 **Parameters:**
-- `jwt_token` (str): JWT authentication token with 'read' scope
 - `account_type` (str, optional): Account type filter (checking, savings, credit_card)
 
 **Returns:** List of balance responses
+
+**Authentication:** JWT token must be provided in HTTP headers:
+- `Authorization: Bearer <token>` (preferred)
+- `X-JWT-Token: <token>` (fallback)
 
 ### get_transactions
 
 Get transaction history for the authenticated user.
 
 **Parameters:**
-- `jwt_token` (str): JWT authentication token with 'read' scope
 - `account_type` (str, optional): Account type filter
 - `start_date` (str, optional): Start date filter (YYYY-MM-DD)
 - `end_date` (str, optional): End date filter (YYYY-MM-DD)
@@ -154,18 +156,21 @@ Get transaction history for the authenticated user.
 
 **Returns:** List of transaction responses, sorted by date (most recent first)
 
+**Authentication:** JWT token must be provided in HTTP headers (see get_balance)
+
 ### get_loans
 
 Get loan information for the authenticated user.
 
-**Parameters:**
-- `jwt_token` (str): JWT authentication token with 'read' scope
+**Parameters:** None
 
 **Returns:** List of loan responses with details and payment schedules
 
+**Authentication:** JWT token must be provided in HTTP headers (see get_balance)
+
 ## Authentication
 
-All tools require a JWT token with the 'read' scope. The token must:
+All tools require a JWT token with the 'read' scope in HTTP headers. The token must:
 - Be signed with the configured `MCP_JWT_SECRET_KEY`
 - Have issuer matching `MCP_JWT_ISSUER`
 - Include 'read' in the `scopes` claim

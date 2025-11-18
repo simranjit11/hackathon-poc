@@ -5,6 +5,7 @@ Exposes hardened, JWT-authenticated banking tools using FASTMCP.
 """
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 import logging
 import sys
 from typing import Optional, List
@@ -26,19 +27,37 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(name="Banking Tools Server")
 
 
-def get_user_from_token(jwt_token: str) -> User:
+def get_user_from_headers() -> User:
     """
-    Extract and validate user from JWT token.
+    Extract and validate user from JWT token in HTTP headers.
     
-    Args:
-        jwt_token: JWT token string
-        
+    Looks for JWT token in:
+    1. Authorization header: "Bearer <token>"
+    2. X-JWT-Token header: "<token>"
+    
     Returns:
         User object with user_id and scopes
         
     Raises:
-        ValueError: If token is invalid or missing required scope
+        ValueError: If token is invalid, missing, or missing required scope
     """
+    headers = get_http_headers()
+    
+    # Try Authorization header first (Bearer token)
+    jwt_token = None
+    auth_header = headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        jwt_token = auth_header[7:].strip()
+    elif auth_header.startswith("bearer "):
+        jwt_token = auth_header[7:].strip()
+    
+    # Fallback to X-JWT-Token header
+    if not jwt_token:
+        jwt_token = headers.get("x-jwt-token") or headers.get("X-JWT-Token")
+    
+    if not jwt_token:
+        raise ValueError("Missing JWT token in Authorization or X-JWT-Token header")
+    
     payload = verify_jwt_token(jwt_token)
     user_id = payload.get("sub")
     scopes = payload.get("scopes", [])
@@ -51,14 +70,12 @@ def get_user_from_token(jwt_token: str) -> User:
 
 @mcp.tool()
 async def get_balance(
-    jwt_token: str,
     account_type: Optional[str] = None
 ) -> List[dict]:
     """
     Get account balances for the authenticated user.
     
     Args:
-        jwt_token: JWT authentication token with 'read' scope
         account_type: Optional account type filter (checking, savings, credit_card)
         
     Returns:
@@ -67,8 +84,8 @@ async def get_balance(
     logger.info("Balance request received")
     
     try:
-        # Authenticate user
-        user = get_user_from_token(jwt_token)
+        # Authenticate user from HTTP headers
+        user = get_user_from_headers()
         logger.info(f"Balance request for user_id: {user.user_id}")
         
         # Check cache
@@ -130,7 +147,6 @@ async def get_balance(
 
 @mcp.tool()
 async def get_transactions(
-    jwt_token: str,
     account_type: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -140,7 +156,6 @@ async def get_transactions(
     Get transaction history for the authenticated user.
     
     Args:
-        jwt_token: JWT authentication token with 'read' scope
         account_type: Optional account type filter
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
@@ -152,8 +167,8 @@ async def get_transactions(
     logger.info("Transaction request received")
     
     try:
-        # Authenticate user
-        user = get_user_from_token(jwt_token)
+        # Authenticate user from HTTP headers
+        user = get_user_from_headers()
         logger.info(
             f"Transaction request for user_id: {user.user_id}, "
             f"limit: {limit}"
@@ -223,21 +238,18 @@ async def get_transactions(
 
 
 @mcp.tool()
-async def get_loans(jwt_token: str) -> List[dict]:
+async def get_loans() -> List[dict]:
     """
     Get loan information for the authenticated user.
     
-    Args:
-        jwt_token: JWT authentication token with 'read' scope
-        
     Returns:
         List of loan responses with details and payment schedules
     """
     logger.info("Loan request received")
     
     try:
-        # Authenticate user
-        user = get_user_from_token(jwt_token)
+        # Authenticate user from HTTP headers
+        user = get_user_from_headers()
         logger.info(f"Loan request for user_id: {user.user_id}")
         
         # Check cache

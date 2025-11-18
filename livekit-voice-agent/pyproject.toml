@@ -16,6 +16,8 @@ dependencies = [
     "spacy>=3.7.0",
     "pip>=25.3",
     "typer>=0.20.0",
+    "httpx>=0.25.0",
+    "python-jose[cryptography]>=3.3.0",
 ]
 
 [project.optional-dependencies]
