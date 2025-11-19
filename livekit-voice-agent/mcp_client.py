@@ -28,10 +28,15 @@ class MCPClient:
         self.jwt_issuer = os.getenv("MCP_JWT_ISSUER", "orchestrator")
         self.jwt_algorithm = os.getenv("MCP_JWT_ALGORITHM", "HS256")
         
-        # HTTP client with timeout
+        # Debug log for JWT secret (masked)
+        masked_secret = f"{self.jwt_secret[:4]}...{self.jwt_secret[-4:]}" if len(self.jwt_secret) > 8 else "***"
+        logger.info(f"MCP Client initialized with JWT Secret: {masked_secret}, Issuer: {self.jwt_issuer}")
+        
+        # HTTP client with timeout and redirect following
         self.client = httpx.AsyncClient(
             timeout=30.0,
-            base_url=self.mcp_url
+            base_url=self.mcp_url,
+            follow_redirects=True  # Follow redirects (e.g., /mcp/ -> /mcp)
         )
     
     def _generate_jwt(
@@ -62,6 +67,12 @@ class MCPClient:
             "jti": f"{user_id}-{now.timestamp()}"
         }
         
+        # If user_id is in UUID format (contains hyphens), it's likely a real user
+        # If it's numeric (like "12345"), it's a legacy/test user
+        # We'll include both sub and user_id claim for compatibility
+        if "-" in str(user_id):
+             payload["user_id"] = user_id
+
         token = jwt.encode(
             payload,
             self.jwt_secret,
@@ -80,7 +91,7 @@ class MCPClient:
         **kwargs
     ) -> Any:
         """
-        Call an MCP tool via HTTP.
+        Call an MCP tool via JSON-RPC over HTTP (FastMCP protocol).
         
         Args:
             tool_name: Name of the MCP tool to call
@@ -94,20 +105,72 @@ class MCPClient:
         """
         jwt_token = self._generate_jwt(user_id, scopes, session_id)
         
-        # Add jwt_token to kwargs
-        params = {
+        # Build tool arguments
+        # Include jwt_token in arguments for tools that require it as a parameter
+        # Also send in headers for tools that read from headers
+        tool_arguments = {
             "jwt_token": jwt_token,
             **kwargs
         }
         
+        # FastMCP uses JSON-RPC 2.0 protocol
+        # POST to base MCP path with JSON-RPC request
+        jsonrpc_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": tool_arguments
+            }
+        }
+        
         try:
-            # MCP tools are called via POST to /tools/{tool_name}
+            # FastMCP expects JSON-RPC requests at the base MCP path
+            # JWT token should be in Authorization header (some tools read from headers)
+            # Use empty string to avoid trailing slash redirect issues
+            # httpx will automatically follow redirects if needed
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": f"Bearer {jwt_token}",
+                "X-JWT-Token": jwt_token  # Fallback header
+            }
+            
             response = await self.client.post(
-                f"/tools/{tool_name}",
-                json=params
+                "",
+                json=jsonrpc_request,
+                headers=headers
             )
+            
+            # Log response details for debugging
+            logger.debug(f"MCP tool call response status: {response.status_code}")
+            logger.debug(f"MCP tool call response headers: {dict(response.headers)}")
+            
             response.raise_for_status()
-            return response.json()
+            
+            # Parse JSON-RPC response
+            jsonrpc_response = response.json()
+            
+            # Check for JSON-RPC errors
+            if "error" in jsonrpc_response:
+                error_msg = jsonrpc_response["error"].get("message", "Unknown error")
+                error_code = jsonrpc_response["error"].get("code", "Unknown")
+                logger.error(f"JSON-RPC error calling {tool_name}: [{error_code}] {error_msg}")
+                raise ValueError(f"Failed to call {tool_name}: [{error_code}] {error_msg}")
+            
+            # Return the result from JSON-RPC response
+            return jsonrpc_response.get("result")
+            
+        except httpx.HTTPStatusError as e:
+            # Log response body for debugging 406 errors
+            try:
+                error_body = e.response.text
+                logger.error(f"MCP tool call failed with status {e.response.status_code}: {error_body}")
+            except Exception:
+                pass
+            logger.error(f"MCP tool call failed: {e}")
+            raise ValueError(f"Failed to call {tool_name}: {str(e)}")
         except httpx.HTTPError as e:
             logger.error(f"MCP tool call failed: {e}")
             raise ValueError(f"Failed to call {tool_name}: {str(e)}")

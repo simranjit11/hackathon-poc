@@ -9,11 +9,17 @@ Voice AI agent built with LiveKit Agents framework for banking services.
    uv sync
    ```
 
-2. **Set up Presidio (PII masking):**
+2. **Set up Presidio (PII masking) - OPTIONAL:**
    ```bash
    ./setup_presidio.sh
    ```
    This will download the spaCy English language model required by Presidio.
+   
+   **Note:** PII masking is disabled by default. To enable it, set:
+   ```bash
+   export ENABLE_PII_MASKING=true
+   ```
+   Or add `ENABLE_PII_MASKING=true` to your `.env` file.
 
 3. **Configure environment variables:**
    Create a `.env` file with:
@@ -23,7 +29,15 @@ Voice AI agent built with LiveKit Agents framework for banking services.
    LIVEKIT_API_KEY=your-api-key
    LIVEKIT_API_SECRET=your-api-secret
    
-   # OpenAI (for LLM)
+   # AI Gateway (APIM) - Recommended
+   AI_GATEWAY_ENDPOINT=https://<your-gateway-endpoint>/openai/v1
+   AI_GATEWAY_API_KEY=your-gateway-api-key
+   
+   # AI Model Configuration (optional)
+   AI_MODEL_ID=gpt-4.1-mini  # Options: gpt-4.1-mini, gpt-4.1
+   AI_MODEL_NAME=GPT-4.1 Mini  # Display name (optional)
+   
+   # OpenAI (for LLM) - Fallback if AI Gateway not configured
    OPENAI_API_KEY=your-openai-key
    
    # AssemblyAI (for STT)
@@ -32,6 +46,8 @@ Voice AI agent built with LiveKit Agents framework for banking services.
    # Deepgram (alternative STT)
    DEEPGRAM_API_KEY=your-deepgram-key
    ```
+   
+   **Note:** If `AI_GATEWAY_ENDPOINT` and `AI_GATEWAY_API_KEY` are set, the agent will use the APIM gateway. Otherwise, it falls back to direct OpenAI API using `OPENAI_API_KEY`.
 
 ## Running the Agent
 
@@ -67,8 +83,35 @@ If you see proxy timeout errors, you may need to:
    unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
    ```
 
+### PII Masking Configuration
+
+PII masking is **optional** and disabled by default. The agent will work fine without it.
+
+**To enable PII masking:**
+1. Install Presidio dependencies:
+   ```bash
+   ./setup_presidio.sh
+   ```
+2. Set environment variable:
+   ```bash
+   export ENABLE_PII_MASKING=true
+   ```
+   Or add to `.env`:
+   ```
+   ENABLE_PII_MASKING=true
+   ```
+
+**To disable PII masking:**
+- Simply don't set `ENABLE_PII_MASKING` (or set it to `false`)
+- The agent will work normally without masking
+
+**PII Masking Module:**
+- PII masking code is in `pii_masking.py` (separate module)
+- Uses Presidio Analyzer and Anonymizer
+- Gracefully handles missing dependencies (returns text as-is if Presidio not installed)
+
 ### Presidio Model Not Found
-If you get errors about missing spaCy model:
+If you get errors about missing spaCy model (only needed if PII masking is enabled):
 ```bash
 uv run python -m spacy download en_core_web_lg
 ```

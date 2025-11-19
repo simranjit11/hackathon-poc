@@ -332,10 +332,23 @@ class BankingAPI:
         }
     
     async def get_customer_name(self, user_id: str) -> Optional[str]:
-        """Get customer name for a user."""
-        if user_id not in self._accounts:
-            return None
-        return self._accounts[user_id].get("customer_name")
+        """
+        Get customer name for a user from backend API.
+        Falls back to mock data if backend API is unavailable.
+        """
+        try:
+            # Try to get user details from backend API
+            from backend_client import get_backend_client
+            backend_client = get_backend_client()
+            user_details = await backend_client.get_user_details(user_id)
+            # Return name from backend API, or email as fallback
+            return user_details.get("name") or user_details.get("email")
+        except Exception as e:
+            # Fallback to mock data if backend API call fails
+            logger.warning(f"Failed to fetch user details from backend API: {e}. Using mock data.")
+            if user_id not in self._accounts:
+                return None
+            return self._accounts[user_id].get("customer_name")
     
     async def set_alert(
         self,

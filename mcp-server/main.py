@@ -4,10 +4,19 @@ MCP Server - Banking Tools
 Exposes hardened, JWT-authenticated banking tools using FASTMCP.
 """
 
+import os
+import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file immediately, before importing config
+# This ensures settings are initialized with the correct environment variables
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(env_path)
+
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 import logging
-import sys
 from typing import Optional, List
 
 from mcp_server.config import settings
@@ -23,11 +32,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Debug: Log the JWT secret being used (masked)
+secret = settings.JWT_SECRET_KEY
+masked_secret = f"{secret[:4]}...{secret[-4:]}" if len(secret) > 8 else "***"
+logger.info(f"Server initialized with JWT Secret: {masked_secret} (len={len(secret)})")
+logger.info(f"Server Issuer: {settings.JWT_ISSUER}")
+
 # Create FastMCP server instance
 mcp = FastMCP(name="Banking Tools Server")
 
 
 def get_user_from_token(jwt_token: str, required_scope: str = "read") -> User:
+    """
+    Extract and validate user from JWT token string.
+    
+    Args:
+        jwt_token: JWT token string
+        required_scope: Required scope (default: "read")
+        
+    Returns:
+        User object with user_id and scopes
+        
+    Raises:
+        ValueError: If token is invalid, missing, or missing required scope
+    """
+    if not jwt_token:
+        raise ValueError("Missing JWT token")
+    
+    payload = verify_jwt_token(jwt_token)
+    user_id = payload.get("sub")
+    scopes = payload.get("scopes", [])
+    
+    if required_scope not in scopes:
+        raise ValueError(f"Missing required '{required_scope}' scope")
+    
+    return User(user_id=user_id, scopes=scopes)
+
+
+def get_user_from_headers(required_scope: str = "read") -> User:
     """
     Extract and validate user from JWT token in HTTP headers.
     
@@ -36,7 +78,6 @@ def get_user_from_token(jwt_token: str, required_scope: str = "read") -> User:
     2. X-JWT-Token header: "<token>"
     
     Args:
-        jwt_token: JWT token string
         required_scope: Required scope (default: "read")
         
     Returns:
@@ -62,14 +103,7 @@ def get_user_from_token(jwt_token: str, required_scope: str = "read") -> User:
     if not jwt_token:
         raise ValueError("Missing JWT token in Authorization or X-JWT-Token header")
     
-    payload = verify_jwt_token(jwt_token)
-    user_id = payload.get("sub")
-    scopes = payload.get("scopes", [])
-    
-    if required_scope not in scopes:
-        raise ValueError(f"Missing required '{required_scope}' scope")
-    
-    return User(user_id=user_id, scopes=scopes)
+    return get_user_from_token(jwt_token, required_scope)
 
 
 @mcp.tool()
@@ -589,6 +623,69 @@ Rates are subject to change and based on creditworthiness. Contact us for person
 
 
 @mcp.tool()
+async def get_user_details(jwt_token: str) -> dict:
+    """
+    Get user profile details including email, name, roles, and permissions.
+    Fetches user information from the backend API using server-to-server authentication.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
+        
+    Returns:
+        Dictionary with user details including id, email, name, roles, permissions
+    """
+    logger.info("Get user details request received")
+    
+    try:
+        # Authenticate user and extract user_id
+        user = get_user_from_token(jwt_token)
+        logger.info(f"Get user details request for user_id: {user.user_id}")
+        
+        # Fetch user details from backend API using API key authentication
+        try:
+            from backend_client import get_backend_client
+            backend_client = get_backend_client()
+            user_details = await backend_client.get_user_details(user.user_id)
+            
+            logger.info(
+                f"User details retrieved for user_id: {user.user_id}, "
+                f"email: {user_details.get('email')}"
+            )
+            
+            # Return formatted user details
+            return {
+                "user_id": user_details.get("id"),
+                "email": user_details.get("email"),
+                "name": user_details.get("name") or "Customer",
+                "roles": user_details.get("roles", []),
+                "permissions": user_details.get("permissions", []),
+                "created_at": user_details.get("createdAt"),
+                "last_login_at": user_details.get("lastLoginAt"),
+            }
+        except Exception as api_error:
+            # If backend API fails, return basic info from JWT
+            logger.warning(
+                f"Failed to fetch user details from backend API: {api_error}. "
+                f"Returning basic info from JWT."
+            )
+            return {
+                "user_id": user.user_id,
+                "email": f"user_{user.user_id}@example.com",  # Fallback
+                "name": "Customer",
+                "roles": user.scopes,  # Use scopes as roles fallback
+                "permissions": user.scopes,
+                "note": "Backend API unavailable, using fallback data",
+            }
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving user details: {e}")
+        raise ValueError(f"Failed to retrieve user details: {str(e)}")
+
+
+@mcp.tool()
 async def get_current_date_time(jwt_token: str) -> str:
     """
     Get the current date and time.
@@ -631,5 +728,6 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         path=settings.MCP_PATH,
-        stateless_http=True
+        stateless_http=True,
+        json_response=True
     )

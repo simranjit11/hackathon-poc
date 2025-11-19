@@ -18,14 +18,17 @@ from livekit.agents import (
 )
 from livekit.agents import Agent, AgentSession, ModelSettings
 from livekit.agents import log as agents_log
+from jose import jwt
 
 logger = agents_log.logger
 from livekit.plugins import silero
 from session_manager import get_session_manager
 from mcp_client import get_mcp_client
 from agno_tools import create_agno_mcp_tools
-from agno import Agent as AgnoAgent
+from agno.agent import Agent as AgnoAgent
 from agno.models.openai import OpenAIChat
+from ai_gateway import AIGateway
+from pii_masking import sanitize_text, is_pii_masking_enabled
 
 from datetime import datetime, timedelta, timezone
 import os
@@ -34,73 +37,6 @@ import json
 # Load environment variables
 load_dotenv()
 
-# JWT Token Generation
-try:
-    from jose import jwt
-    JOSE_AVAILABLE = True
-except ImportError:
-    JOSE_AVAILABLE = False
-
-
-class JWTAuthenticatedMCPServer(mcp.MCPServerHTTP):
-    """
-    MCP Server wrapper that adds JWT authentication via HTTP headers.
-    
-    JWT token is sent in the Authorization header as "Bearer <token>"
-    and automatically included in all MCP tool calls.
-    """
-    
-    def __init__(
-        self,
-        url: str,
-        user_id: str,
-        headers: dict[str, Any] | None = None,
-        timeout: float = 5,
-        sse_read_timeout: float = 60 * 5,
-        client_session_timeout_seconds: float = 5,
-    ) -> None:
-        # Store configuration first
-        self._user_id = user_id
-        self._jwt_secret_key = os.getenv("MCP_JWT_SECRET_KEY", "your-secret-key-change-in-production")
-        self._jwt_issuer = os.getenv("MCP_JWT_ISSUER", "orchestrator")
-        self._jwt_algorithm = os.getenv("MCP_JWT_ALGORITHM", "HS256")
-        
-        # Generate JWT token
-        jwt_token = self._generate_jwt_token(user_id)
-        
-        # Add JWT to headers (Authorization: Bearer <token>)
-        auth_headers = headers.copy() if headers else {}
-        auth_headers["Authorization"] = f"Bearer {jwt_token}"
-        
-        super().__init__(
-            url=url,
-            headers=auth_headers,
-            timeout=timeout,
-            sse_read_timeout=sse_read_timeout,
-            client_session_timeout_seconds=client_session_timeout_seconds,
-        )
-    
-    def _generate_jwt_token(self, user_id: str, scopes: list[str] = None) -> str:
-        """Generate JWT token for MCP server authentication."""
-        if not JOSE_AVAILABLE:
-            raise RuntimeError("python-jose is required for JWT generation")
-        
-        if scopes is None:
-            scopes = ["read"]
-        
-        now = datetime.now(timezone.utc)
-        exp = now + timedelta(minutes=15)
-        
-        payload = {
-            "iss": self._jwt_issuer,
-            "sub": user_id,
-            "scopes": scopes,
-            "iat": int(now.timestamp()),
-            "exp": int(exp.timestamp()),
-            "jti": f"agent-{int(now.timestamp())}"
-        }
-        
-        return jwt.encode(payload, self._jwt_secret_key, algorithm=self._jwt_algorithm)
 
 
 class Assistant(Agent):
@@ -112,7 +48,7 @@ class Assistant(Agent):
             You can help customers with account balances, payments, transfers, transaction history,
             loan inquiries, and setting up alerts. Keep responses clear and professional."""
         )
-        
+
         # MCP client for calling banking tools
         self.mcp_client = get_mcp_client()
         
@@ -123,54 +59,69 @@ class Assistant(Agent):
         
         # Agno agent will be initialized when user context is available
         self.agno_agent: Optional[AgnoAgent] = None
-
-    def _sanitize_text(self, text: str) -> str:
-        """Helper to run Presidio Analyzer and Anonymizer on text."""
-        if not text or text.strip() == "":
-            return text
-            
-        # 1. Analyze (Detect PII)
-        # Include OTP and other sensitive entities
-        analyzer = get_analyzer()
-        results = analyzer.analyze(
-            text=text, 
-            entities=["OTP", "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "SSN", "IBAN_CODE", "US_DRIVER_LICENSE", "US_PASSPORT", "US_BANK_NUMBER"], 
-            language='en'
-        )
         
-        # 2. Anonymize (Redact PII)
-        # You can customize operators: "replace", "mask", "redact", "hash"
-        anonymizer = get_anonymizer()
-        anonymized_result = anonymizer.anonymize(
-            text=text,
-            analyzer_results=results,
-            operators={"DEFAULT": OperatorConfig("replace", {"new_value": "[REDACTED]"})}
-        )
-        
-        if len(results) > 0:
-            logger.info(f"🛡️ Guardrail triggered. Redacted {len(results)} entities.")
-            
-        return anonymized_result.text
+        # Log PII masking status
+        if is_pii_masking_enabled():
+            logger.info("🛡️ PII masking is ENABLED")
+        else:
+            logger.info("ℹ️ PII masking is DISABLED (set ENABLE_PII_MASKING=true to enable)")
     
-    def _initialize_agno_agent(self):
+    async def _initialize_agno_agent(self):
         """Initialize Agno agent with MCP server tools when user context is available."""
         if self.agno_agent is None and self.user_id and self.session_id:
-            # Create MCP tools - Agno will automatically discover tools from MCP server
-            mcp_tools = create_agno_mcp_tools(self.user_id, self.session_id)
+            # Create MCP tools wrapper
+            mcp_tools_wrapper = create_agno_mcp_tools(self.user_id, self.session_id)
             
-            # Initialize Agno agent with OpenAI model and MCP tools
-            # Agno automatically discovers and uses tools from MCP server
+            # Get list of Function objects (these use our HTTP client with JWT)
+            mcp_tools = mcp_tools_wrapper.get_tools()
+            logger.info(f"Created {len(mcp_tools)} MCP tools for Agno")
+            
+            # Get model ID from environment or use default (gpt-4.1-mini for gateway)
+            model_id = os.getenv("AI_MODEL_ID", "gpt-4.1-mini")
+            
+            # Try to use AI Gateway if configured, otherwise fall back to OpenAI
+            try:
+                # Use AI Gateway with proper URL structure and headers
+                # agent_id is None, so AIGateway will use hardcoded constant UUID
+                model = AIGateway(model_id=model_id)
+                logger.info(f"Using AI Gateway with model: {model_id}")
+            except ValueError as e:
+                # AI Gateway not configured, fall back to OpenAI
+                logger.warning(f"AI Gateway not configured ({e}), falling back to OpenAI")
+                openai_api_key = os.getenv("OPENAI_API_KEY")
+                if not openai_api_key:
+                    raise ValueError("Neither AI Gateway nor OPENAI_API_KEY is configured")
+                
+                model = OpenAIChat(
+                    id=model_id,
+                    name=os.getenv("AI_MODEL_NAME", "GPT-4.1 Mini"),
+                    api_key=openai_api_key,
+                )
+                logger.info(f"Using OpenAI API directly with model: {model_id}")
+            
+            # Initialize Agno agent with model (via AI Gateway or OpenAI) and MCP tools
             self.agno_agent = AgnoAgent(
                 name="banking_assistant",
-                model=OpenAIChat(
-                    id="gpt-4o-mini",
-                    name="GPT-4o Mini",
-                ),
-                tools=[mcp_tools],  # MCP server tools are automatically discovered
+                model=model,
+                tools=mcp_tools,  # List of Function objects that call MCP server via HTTP with JWT
                 instructions="""You are a helpful and professional banking voice assistant.
-                You can help customers with account balances, payments, transfers, transaction history,
-                loan inquiries, and setting up alerts. Keep responses clear and professional.
-                Use the available tools from the MCP server to perform banking operations automatically when needed.""",
+
+IMPORTANT: You MUST use the available tools to perform banking operations. Do not make up or guess information.
+
+When a user asks about:
+- Account balances → Use the get_balance tool
+- Transaction history → Use the get_transactions tool
+- Loans → Use the get_loans tool
+- Credit limits → Use the get_credit_limit tool
+- Alerts → Use the get_alerts tool
+- Interest rates → Use the get_interest_rates tool
+- User profile/details → Use the get_user_details tool
+- Making payments → Use the make_payment tool
+- Setting alerts → Use the set_alert tool
+
+Always call the appropriate tool first, then use the tool's response to answer the user's question. Never provide information without calling the tools first.
+
+Keep responses clear, professional, and based on actual tool responses.""",
                 markdown=True,
             )
             logger.info(f"Initialized Agno agent with MCP server tools (auto-discovered) for user_id: {self.user_id}")
@@ -183,11 +134,11 @@ class Assistant(Agent):
     ):
         """
         Intercepts User Input -> LLM using Agno framework.
-        Sanitizes the chat context so the LLM never sees the raw PII.
+        Optionally sanitizes the chat context so the LLM never sees the raw PII (if enabled).
         Agno automatically handles tool calling based on tool definitions.
         """
-        # Ensure Agno agent is initialized
-        self._initialize_agno_agent()
+        # Ensure Agno agent is initialized (async)
+        await self._initialize_agno_agent()
         
         if not self.agno_agent:
             # Fallback to default if Agno not initialized
@@ -204,12 +155,13 @@ class Assistant(Agent):
                     if item.role == "user":
                         user_message = item.text_content
                         if user_message:
-                            # Sanitize PII before sending to Agno
-                            user_message = self._sanitize_text(user_message)
-                            if user_message != item.text_content:
-                                logger.info(f"Sanitized User Input before Agno: {item.text_content[:50]}... -> {user_message[:50]}...")
+                            # Optionally sanitize PII before sending to Agno (if enabled)
+                            sanitized_message = sanitize_text(user_message)
+                            if sanitized_message != user_message:
+                                logger.info(f"Sanitized User Input before Agno: {user_message[:50]}... -> {sanitized_message[:50]}...")
+                            user_message = sanitized_message
                         break
-        
+                            
         if not user_message:
             # No user message, return default behavior
             return super().llm_node(chat_ctx, tools, model_settings)
@@ -217,7 +169,20 @@ class Assistant(Agent):
         # Run Agno agent with user message
         # Agno will automatically call MCP tools as needed
         try:
-            response = self.agno_agent.run(user_message)
+            # Log that we're about to call Agno
+            logger.info(f"Calling Agno agent with message: {user_message[:100]}...")
+            
+            # Run Agno agent - it should automatically call tools
+            # Note: Since our tools are async, we must use arun() instead of run()
+            logger.info(f"Running Agno agent.arun() with message: {user_message[:50]}...")
+            response = await self.agno_agent.arun(user_message)
+            
+            # Log the response
+            logger.info(f"Agno agent responded. Response type: {type(response)}")
+            if hasattr(response, 'content'):
+                logger.info(f"Response content length: {len(str(response.content))}")
+            if hasattr(response, 'messages'):
+                logger.info(f"Response messages: {len(response.messages) if response.messages else 0}")
             
             # Convert Agno response to LiveKit streaming format
             # Agno returns a RunResponse object with content
@@ -229,8 +194,8 @@ class Assistant(Agent):
                 chunk_size = 50
                 for i in range(0, len(response_text), chunk_size):
                     chunk = response_text[i:i + chunk_size]
-                    # Sanitize output before streaming
-                    sanitized_chunk = self._sanitize_text(chunk)
+                    # Optionally sanitize output before streaming (if enabled)
+                    sanitized_chunk = sanitize_text(chunk)
                     yield sanitized_chunk
             
             # Return the stream
@@ -244,7 +209,7 @@ class Assistant(Agent):
     def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings):
         """
         Intercepts LLM Output -> TTS.
-        Sanitizes the stream before the agent speaks it.
+        Optionally sanitizes the stream before the agent speaks it (if enabled).
         """
         
         # We define a generator to wrap the incoming text stream
@@ -254,7 +219,7 @@ class Assistant(Agent):
                 # Ideally, you should buffer by sentence. 
                 # For this sample, we assume 'chunk' is substantial or we accept partial redaction risks.
                 # LiveKit's LLM stream usually yields chunks; a buffer might be needed for production accuracy.
-                sanitized_chunk = self._sanitize_text(chunk)
+                sanitized_chunk = sanitize_text(chunk)
                 yield sanitized_chunk
 
         # Pass the safe stream to the original TTS node logic
@@ -276,9 +241,21 @@ async def entrypoint(ctx: agents.JobContext):
     permissions = ["read"]
     platform = "web"
 
-    # Get the first remote participant (the user)
-    # In LiveKit, participants include both local and remote participants
-    for participant in room.remote_participants.values():
+    # Connect to the room first
+    logger.info(f"Connecting to room {room_name}")
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    logger.info(f"Connected to room {room_name}")
+
+    logger.info(f"Waiting for participant to join room {room_name}...")
+    participant = await ctx.wait_for_participant()
+    logger.info(f"Participant joined: {participant.identity}, metadata: {participant.metadata}")
+
+    # Check this specific participant (no need to loop over all if we waited for one)
+    if participant:
+        print(f"DEBUG: Participant Identity: {participant.identity}")
+        print(f"DEBUG: Metadata type: {type(participant.metadata)}")
+        print(f"DEBUG: Metadata content: {participant.metadata}")
+        
         if participant.metadata:
             try:
                 # Check if metadata is a string (not a MagicMock in console mode)
@@ -290,41 +267,40 @@ async def entrypoint(ctx: agents.JobContext):
                     permissions = metadata.get("permissions", ["read"])
                     # Determine platform from metadata or participant name
                     platform = metadata.get("platform", "web")
-                    break
-                else:
-                    # In console mode, metadata might be a MagicMock - skip it
-                    logger.debug(f"Skipping non-string metadata: {type(participant.metadata)}")
-                    continue
             except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                # If JSON parsing fails, check if it's a JWT token string
+                if isinstance(participant.metadata, str) and (participant.metadata.startswith("eyJ") or "Bearer " in participant.metadata):
+                    try:
+                        # Clean up token if needed
+                        token = participant.metadata.replace("Bearer ", "").strip()
+                        # Decode without verification to extract claims
+                        claims = jwt.get_unverified_claims(token)
+                        
+                        logger.info("Successfully extracted user identity from JWT in metadata")
+                        user_id = claims.get("user_id") or claims.get("sub")
+                        email = claims.get("email")
+                        roles = claims.get("roles", ["customer"])
+                        permissions = claims.get("permissions", ["read"])
+                    except Exception as jwt_error:
+                        logger.debug(f"Failed to parse metadata as JWT: {jwt_error}")
+
                 logger.debug(f"Error parsing participant metadata: {e}")
-                continue
 
     # If no metadata found, try to extract from participant identity
     # Fallback: use participant identity if it follows the pattern voice_assistant_user_{user_id}
-    if not user_id:
-        for participant in room.remote_participants.values():
-            identity = participant.identity
-            # Check if identity is a string (not a MagicMock)
-            if isinstance(identity, str) and identity.startswith("voice_assistant_user_"):
-                user_id = identity.replace("voice_assistant_user_", "")
-                # Use default values if metadata not available
-                email = f"user_{user_id}@example.com"
-                break
+    if not user_id and participant:
+        identity = participant.identity
+        # Check if identity is a string (not a MagicMock)
+        if isinstance(identity, str) and identity.startswith("voice_assistant_user_"):
+            user_id = identity.replace("voice_assistant_user_", "")
+            # Use default values if metadata not available
+            email = f"user_{user_id}@example.com"
 
     # Final fallback: use environment variable or default for console mode
     if not user_id:
         user_id = os.getenv("DEFAULT_USER_ID", "12345")
         email = f"user_{user_id}@example.com"
         logger.info(f"Using default user_id from environment: {user_id}")
-
-    # Get MCP server URL from environment or use default
-    mcp_server_url = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
-    
-    # Create JWT-authenticated MCP server with the extracted user_id
-    mcp_server = JWTAuthenticatedMCPServer(
-        url=mcp_server_url,
-        user_id=user_id,
-    )
 
     # Initialize session in Redis if user_id is available
     session_manager = get_session_manager()
@@ -358,9 +334,13 @@ async def entrypoint(ctx: agents.JobContext):
     # Create agent session
     # Note: Using VAD (Voice Activity Detection) for turn detection instead of MultilingualModel
     # VAD handles voice activity without requiring model downloads
+    # Get model ID for LiveKit session (fallback to default if not set)
+    # Note: LiveKit uses a different format, but we'll use the same model ID
+    livekit_model_id = os.getenv("AI_MODEL_ID", "gpt-4.1-mini")
+    
     agent_session = AgentSession(
         stt="assemblyai/universal-streaming:en",
-        llm="openai/gpt-4.1-mini",
+        llm=f"openai/{livekit_model_id}",
         tts="cartesia/sonic-3:a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Male voice
         vad=silero.VAD.load(),
         # turn_detection removed - VAD handles voice activity detection without model downloads
