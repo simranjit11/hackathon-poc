@@ -15,6 +15,7 @@ from mcp_server.auth import verify_jwt_token, User
 from mcp_server.banking_api import BankingAPI
 from mcp_server.cache import cache_manager
 from mcp_server.masking import mask_account_number, mask_merchant_info
+from mcp_server.stripe_payment import StripePaymentService
 
 # Configure logging
 logging.basicConfig(
@@ -129,6 +130,7 @@ async def get_balance(
         
         # Cache results (5 minute TTL)
         await cache_manager.set(cache_key, balances, ttl=300)
+        
         
         logger.info(
             f"Balance retrieved for user_id: {user.user_id}, "
@@ -295,6 +297,168 @@ async def get_loans() -> List[dict]:
     except Exception as e:
         logger.error(f"Error retrieving loans: {e}")
         raise ValueError(f"Failed to retrieve loan information: {str(e)}")
+
+
+@mcp.tool()
+async def make_payment(
+    amount: float,
+    to_account: str,
+    from_account_type: str = "checking",
+    description: Optional[str] = None,
+    test_scenario: str = "success"
+) -> dict:
+    """
+    Make a test payment using Stripe from one account to another.
+    
+    Args:
+        amount: Payment amount in INR
+        to_account: Destination account number or identifier
+        from_account_type: Source account type (checking, savings)
+        description: Payment description
+        test_scenario: Test scenario (success, decline, insufficient_funds, 
+                       lost_card, stolen_card, 3ds_required)
+        
+    Returns:
+        Payment result with transaction details
+    """
+    logger.info(f"Payment request received: amount={amount}, scenario={test_scenario}")
+    
+    try:
+        # Authenticate user from HTTP headers
+        user = get_user_from_headers()
+        
+        # Check if user has 'write' scope for payments
+        if "write" not in user.scopes:
+            raise ValueError("Missing required 'write' scope for payments")
+        
+        logger.info(f"Payment request for user_id: {user.user_id}, amount: {amount}")
+        
+        # Verify user has sufficient balance
+        banking_api = BankingAPI()
+        accounts = await banking_api.get_accounts(user.user_id)
+        
+        # Find the source account
+        source_account = next(
+            (acc for acc in accounts if acc.get("type") == from_account_type),
+            None
+        )
+        
+        if not source_account:
+            raise ValueError(f"Account type '{from_account_type}' not found")
+        
+        current_balance = source_account.get("balance", 0.0)
+        source_account_number = source_account.get("account_number", "")
+        
+        # Check sufficient balance
+        if current_balance < amount:
+            raise ValueError(
+                f"Insufficient funds. Available: ₹{current_balance:.2f}, "
+                f"Required: ₹{amount:.2f}"
+            )
+        
+        # Process payment with Stripe
+        stripe_service = StripePaymentService()
+        payment_result = await stripe_service.simulate_test_payment(
+            amount=amount,
+            scenario=test_scenario,
+            currency="inr",
+            description=description or f"Transfer to {to_account}",
+            from_account=source_account_number,
+            to_account=to_account
+        )
+        
+        # Build response based on payment status
+        if payment_result.get("status") == "succeeded":
+            # Payment succeeded
+            logger.info(
+                f"Payment succeeded for user_id: {user.user_id}, "
+                f"payment_intent: {payment_result.get('payment_intent_id')}"
+            )
+            
+            response = {
+                "status": "success",
+                "payment_intent_id": payment_result.get("payment_intent_id"),
+                "amount": amount,
+                "currency": "INR",
+                "description": description or f"Transfer to {to_account}",
+                "from_account": {
+                    "type": from_account_type,
+                    "account_number": mask_account_number(source_account_number),
+                    "previous_balance": current_balance,
+                    "new_balance": current_balance - amount
+                },
+                "to_account": {
+                    "account_number": mask_account_number(to_account)
+                },
+                "timestamp": payment_result.get("created"),
+                "test_mode": True,
+                "test_scenario": test_scenario,
+                "charges": payment_result.get("charges", [])
+            }
+        else:
+            # Payment failed
+            response = {
+                "status": "failed",
+                "error": payment_result.get("error", "Payment declined"),
+                "amount": amount,
+                "currency": "INR",
+                "from_account": {
+                    "type": from_account_type,
+                    "account_number": mask_account_number(source_account_number)
+                },
+                "to_account": {
+                    "account_number": mask_account_number(to_account)
+                },
+                "test_mode": True,
+                "test_scenario": test_scenario
+            }
+        
+        logger.info(f"Payment completed: {response.get('status')}")
+        return response
+        
+    except ValueError as e:
+        logger.warning(f"Payment error: {e}")
+        raise ValueError(f"Payment failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error processing payment: {e}")
+        raise ValueError(f"Payment processing failed: {str(e)}")
+
+
+@mcp.tool()
+async def get_payment_status(payment_intent_id: str) -> dict:
+    """
+    Get the status of a Stripe payment.
+    
+    Args:
+        payment_intent_id: Stripe Payment Intent ID
+        
+    Returns:
+        Payment status details
+    """
+    logger.info(f"Payment status request: {payment_intent_id}")
+    
+    try:
+        # Authenticate user
+        user = get_user_from_headers()
+        
+        logger.info(
+            f"Payment status request for user_id: {user.user_id}, "
+            f"payment_intent_id: {payment_intent_id}"
+        )
+        
+        # Get payment status from Stripe
+        stripe_service = StripePaymentService()
+        status = await stripe_service.get_payment_status(payment_intent_id)
+        
+        logger.info(f"Payment status retrieved: {status.get('status')}")
+        return status
+        
+    except ValueError as e:
+        logger.warning(f"Error retrieving payment status: {e}")
+        raise ValueError(str(e))
+    except Exception as e:
+        logger.error(f"Error retrieving payment status: {e}")
+        raise ValueError(f"Failed to retrieve payment status: {str(e)}")
 
 
 if __name__ == "__main__":

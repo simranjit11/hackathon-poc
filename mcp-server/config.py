@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # Stripe settings
+    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "sk_test_51SV4tR6iHKfkinmUligxtDw9VcVbScK20lx71vF3MyjV9UIisbo9cdaV6Ed0xuuDA464Q445jJ8F1NvSTWP46aGn00Ab2kufqG")
+    STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_test_...")
     
     class Config:
         env_file = ".env"

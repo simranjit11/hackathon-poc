@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
+    # Stripe settings
+    stripe_secret_key: str = "sk_test_..."
+    stripe_publishable_key: str = "pk_test_..."
+    
     if SettingsConfigDict:
         model_config = SettingsConfigDict(
             env_file=".env",
@@ -74,6 +78,8 @@ class Settings(BaseSettings):
             "REDIS_URL": "redis_url",
             "LOG_LEVEL": "log_level",
             "CORS_ORIGINS": "cors_origins",
+            "STRIPE_SECRET_KEY": "stripe_secret_key",
+            "STRIPE_PUBLISHABLE_KEY": "stripe_publishable_key",
         }
         
         # Override with environment variables
@@ -147,6 +153,14 @@ class Settings(BaseSettings):
     @property
     def LOG_LEVEL(self) -> str:
         return self.log_level
+    
+    @property
+    def STRIPE_SECRET_KEY(self) -> str:
+        return self.stripe_secret_key
+    
+    @property
+    def STRIPE_PUBLISHABLE_KEY(self) -> str:
+        return self.stripe_publishable_key
 
 
 settings = Settings()
