@@ -6,6 +6,7 @@ In production, this would call an external banking service.
 """
 
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -258,4 +259,139 @@ class BankingAPI:
             return []
         
         return self._loans[user_id].copy()
+    
+    # Mock alerts storage
+    _alerts: Dict[str, List[Dict[str, Any]]] = {}
+    
+    async def make_payment(
+        self,
+        user_id: str,
+        from_account: str,
+        to_account: str,
+        amount: float,
+        description: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Make a payment or transfer.
+        
+        Args:
+            user_id: User identifier
+            from_account: Source account type ('checking', 'savings')
+            to_account: Destination account or payee name
+            amount: Amount to transfer
+            description: Optional description
+            
+        Returns:
+            Payment confirmation dictionary
+            
+        Raises:
+            ValueError: If user not found, account not found, or insufficient funds
+        """
+        if user_id not in self._accounts:
+            raise ValueError(f"Customer ID {user_id} not found.")
+        
+        customer = self._accounts[user_id]
+        
+        if from_account not in customer:
+            raise ValueError(f"Source account '{from_account}' not found.")
+        
+        account = customer[from_account]
+        
+        if account["balance"] < amount:
+            raise ValueError(
+                f"Insufficient funds. Available balance: ${account['balance']:.2f}"
+            )
+        
+        # Process the payment
+        account["balance"] -= amount
+        
+        # Add to transaction history
+        if user_id not in self._transactions:
+            self._transactions[user_id] = []
+        
+        transaction = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "description": f"Payment to {to_account}" + (f" - {description}" if description else ""),
+            "amount": -amount,
+            "type": "payment",
+            "account_number": account["account_number"]
+        }
+        
+        self._transactions[user_id].insert(0, transaction)
+        
+        confirmation_number = f"PAY{len(self._transactions[user_id]) + 1000}"
+        
+        return {
+            "confirmation_number": confirmation_number,
+            "from_account": from_account,
+            "to_account": to_account,
+            "amount": amount,
+            "new_balance": account["balance"],
+            "description": description,
+            "date": transaction["date"]
+        }
+    
+    async def get_customer_name(self, user_id: str) -> Optional[str]:
+        """
+        Get customer name for a user from backend API.
+        Falls back to mock data if backend API is unavailable.
+        """
+        try:
+            # Try to get user details from backend API
+            from backend_client import get_backend_client
+            backend_client = get_backend_client()
+            user_details = await backend_client.get_user_details(user_id)
+            # Return name from backend API, or email as fallback
+            return user_details.get("name") or user_details.get("email")
+        except Exception as e:
+            # Fallback to mock data if backend API call fails
+            logger.warning(f"Failed to fetch user details from backend API: {e}. Using mock data.")
+            if user_id not in self._accounts:
+                return None
+            return self._accounts[user_id].get("customer_name")
+    
+    async def set_alert(
+        self,
+        user_id: str,
+        alert_type: str,
+        description: str,
+        due_date: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Set up a payment reminder or alert.
+        
+        Args:
+            user_id: User identifier
+            alert_type: Type of alert ('payment', 'low_balance', 'large_transaction')
+            description: Description of the alert
+            due_date: Optional due date for payment reminders
+            
+        Returns:
+            Alert dictionary
+        """
+        if user_id not in self._alerts:
+            self._alerts[user_id] = []
+        
+        alert = {
+            "type": alert_type.replace('_', ' ').title() + " Alert",
+            "description": description + (f" (Due: {due_date})" if due_date else ""),
+            "active": True,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        self._alerts[user_id].append(alert)
+        
+        return alert
+    
+    async def get_alerts(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all alerts for a user.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            List of alert dictionaries
+        """
+        return self._alerts.get(user_id, [])
 

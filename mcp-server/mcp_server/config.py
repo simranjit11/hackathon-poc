@@ -86,6 +86,10 @@ class Settings(BaseSettings):
         for env_key, field_name in env_map.items():
             env_value = os.getenv(env_key)
             if env_value is not None:
+                # Remove surrounding quotes if present
+                if isinstance(env_value, str) and len(env_value) >= 2 and env_value[0] == '"' and env_value[-1] == '"':
+                    env_value = env_value[1:-1]
+                
                 if field_name in ["port", "database_pool_min_size", "database_pool_max_size"]:
                     kwargs[field_name] = int(env_value)
                 elif field_name in ["debug", "cache_enabled"]:
