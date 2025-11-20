@@ -29,6 +29,8 @@ from agno.agent import Agent as AgnoAgent
 from agno.models.openai import OpenAIChat
 from ai_gateway import AIGateway
 from pii_masking import sanitize_text, is_pii_masking_enabled
+from elicitation_manager import get_elicitation_manager
+from elicitation_response_handler import get_response_handler
 
 from datetime import datetime, timedelta, timezone
 import os
@@ -352,6 +354,71 @@ async def entrypoint(ctx: agents.JobContext):
         # turn_detection removed - VAD handles voice activity detection without model downloads
     )
 
+    # Initialize elicitation handler
+    elicitation_manager = get_elicitation_manager()
+    response_handler = get_response_handler()
+    
+    # Setup data channel listener for elicitation responses
+    @room.on("data_received")
+    def on_data_received(data_packet):
+        """Handle data channel messages from client (elicitation responses)."""
+        try:
+            # Decode the data
+            payload_bytes = bytes(data_packet.data)
+            payload_str = payload_bytes.decode('utf-8')
+            payload = json.loads(payload_str)
+            
+            logger.info(f"[DataChannel] Received message type: {payload.get('type')}")
+            
+            # Handle elicitation response
+            if payload.get("type") == "elicitation_response":
+                elicitation_id = payload.get("elicitation_id")
+                user_input = payload.get("user_input")
+                biometric_token = payload.get("biometric_token")
+                
+                logger.info(f"[Elicitation] Processing response for {elicitation_id}")
+                
+                # Handle response asynchronously
+                async def handle_async():
+                    try:
+                        result = await response_handler.handle_response(
+                            elicitation_id=elicitation_id,
+                            user_input=user_input,
+                            biometric_token=biometric_token
+                        )
+                        
+                        # Send result back to client
+                        result_json = json.dumps(result)
+                        result_bytes = result_json.encode('utf-8')
+                        await room.local_participant.publish_data(result_bytes)
+                        
+                        # If successful, narrate confirmation to user
+                        if result.get('status') == 'completed':
+                            payment_result = result.get('payment_result', {})
+                            confirmation = payment_result.get('confirmation_number', 'Unknown')
+                            amount = payment_result.get('amount', 0)
+                            
+                            await agent_session.generate_reply(
+                                instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
+                            )
+                        else:
+                            error = result.get('error', 'Unknown error')
+                            await agent_session.generate_reply(
+                                instructions=f"Inform the user that their payment could not be completed: {error}"
+                            )
+                            
+                    except Exception as e:
+                        logger.error(f"[Elicitation] Error handling response: {e}", exc_info=True)
+                
+                # Schedule the async handler
+                import asyncio
+                asyncio.create_task(handle_async())
+                
+        except Exception as e:
+            logger.error(f"[DataChannel] Error processing data: {e}", exc_info=True)
+    
+    logger.info("[DataChannel] Elicitation handler registered")
+
     # Start the session
     await agent_session.start(
         room=room,
@@ -360,7 +427,7 @@ async def entrypoint(ctx: agents.JobContext):
 
     # Generate initial greeting
     await agent_session.generate_reply(
-        instructions="Greet the user professionally as a banking assistant and ask for their customer ID to help with their banking needs."
+        instructions="Greet the user professionally as a banking assistant and ask how you can help with their banking needs today."
     )
 
 if __name__ == "__main__":

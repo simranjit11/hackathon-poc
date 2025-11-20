@@ -15,6 +15,7 @@ import { useConnectionTimeout } from '@/hooks/useConnectionTimout';
 import { useDebugMode } from '@/hooks/useDebug';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '../livekit/scroll-area/scroll-area';
+import { ElicitationManager } from '@/components/app/elicitation/ElicitationManager';
 
 const MotionBottom = motion.create('div');
 
@@ -111,6 +112,9 @@ export const SessionView = ({
 
       {/* Tile Layout */}
       <TileLayout chatOpen={chatOpen} />
+
+      {/* Elicitation Manager - Handles payment confirmations */}
+      <ElicitationManager />
 
       {/* Bottom */}
       <MotionBottom

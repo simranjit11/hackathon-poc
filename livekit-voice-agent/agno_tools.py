@@ -48,6 +48,7 @@ class AuthenticatedMCPTools:
             "get_current_date_time": ["read"],
             "get_user_details": ["read"],  # Get user profile information
             "make_payment": ["transact"],
+            "make_payment_with_elicitation": ["transact"],
             "set_alert": ["configure"],
         }
     
@@ -142,6 +143,11 @@ class AuthenticatedMCPTools:
                 "name": "make_payment",
                 "description": "Make a payment or transfer funds. Requires to_account (recipient account number), amount (payment amount), and optional description. Returns payment confirmation.",
                 "func": self._create_tool_func("make_payment"),
+            },
+            {
+                "name": "make_payment_with_elicitation",
+                "description": "Make a payment with user confirmation (OTP/approval). Use this for payments that require additional authorization. Requires from_account, to_account, amount, and optional description. Returns elicitation request for user confirmation.",
+                "func": self._create_tool_func("make_payment_with_elicitation"),
             },
             {
                 "name": "set_alert",
