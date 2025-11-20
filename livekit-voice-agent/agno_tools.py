@@ -22,17 +22,19 @@ class AuthenticatedMCPTools:
     Uses Function.from_callable() to convert async functions into Agno Function objects.
     """
     
-    def __init__(self, user_id: str, session_id: str, mcp_url: Optional[str] = None):
+    def __init__(self, user_id: str, session_id: str, email: Optional[str] = None, mcp_url: Optional[str] = None):
         """
         Initialize authenticated MCP tools.
         
         Args:
             user_id: User identifier for JWT generation
             session_id: Session/room identifier for JWT generation
+            email: User email address for JWT generation (optional but recommended)
             mcp_url: MCP server URL (defaults to env var, kept for compatibility)
         """
         self.user_id = user_id
         self.session_id = session_id
+        self.email = email
         self.mcp_client = get_mcp_client()
         
         # Scope mapping for JWT generation
@@ -75,6 +77,7 @@ class AuthenticatedMCPTools:
                 self.user_id,
                 self.session_id,
                 scopes,
+                email=self.email,
                 **kwargs
             )
             logger.info(f"✅ MCP Tool {tool_name} succeeded")
@@ -181,15 +184,16 @@ class AuthenticatedMCPTools:
         return tool_func
 
 
-def create_agno_mcp_tools(user_id: str, session_id: str):
+def create_agno_mcp_tools(user_id: str, session_id: str, email: Optional[str] = None):
     """
     Create MCP tools wrapper for Agno.
     
     Args:
         user_id: User identifier
         session_id: Session/room identifier
+        email: User email address (optional but recommended)
         
     Returns:
         AuthenticatedMCPTools instance
     """
-    return AuthenticatedMCPTools(user_id, session_id)
+    return AuthenticatedMCPTools(user_id, session_id, email=email)

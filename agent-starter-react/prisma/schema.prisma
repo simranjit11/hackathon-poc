@@ -11,35 +11,152 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  passwordHash  String   @map("password_hash")
-  roles         String[] @default(["customer"])
-  permissions   String[] @default(["read"])
-  name          String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-  lastLoginAt   DateTime? @map("last_login_at")
-  beneficiaries Beneficiary[]
+  id                      String                   @id @default(uuid())
+  email                   String                   @unique
+  passwordHash            String                   @map("password_hash")
+  roles                   String[]                 @default(["customer"])
+  permissions             String[]                 @default(["read"])
+  name                    String?
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  lastLoginAt             DateTime?                @map("last_login_at")
+  beneficiaries           Beneficiary[]
+  accounts                Account[]
+  loans                   Loan[]
+  transactions            Transaction[]
+  paymentAlerts           PaymentAlert[]
+  notificationPreferences NotificationPreference[]
 
-  @@map("users")
   @@index([email])
   @@index([createdAt])
+  @@map("users")
 }
 
 model Beneficiary {
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
-  nickname       String   // e.g. "Mom", "Landlord"
+  nickname       String // e.g. "Mom", "Landlord"
   fullName       String   @map("full_name")
   paymentAddress String   @map("payment_address") // UPI ID or Account Number
-  paymentType    String   @map("payment_type")    // "upi" or "account"
+  paymentType    String   @map("payment_type") // "upi" or "account"
   bankName       String?  @map("bank_name")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
 
   @@unique([userId, nickname]) // Prevent duplicate nicknames for same user
   @@map("beneficiaries")
+}
+
+model Account {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  accountNumber String   @unique @map("account_number")
+  accountType   String   @map("account_type") // "checking" | "savings" | "credit_card"
+  balance       Decimal  @db.Decimal(15, 2)
+  creditLimit   Decimal? @map("credit_limit") @db.Decimal(15, 2) // For credit cards
+  currency      String   @default("USD")
+  status        String   @default("active") // "active" | "closed" | "frozen"
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  loans        Loan[]
+
+  @@index([userId])
+  @@index([accountType])
+  @@index([status])
+  @@map("accounts")
+}
+
+model Loan {
+  id                  String   @id @default(uuid())
+  userId              String   @map("user_id")
+  accountId           String?  @map("account_id") // Optional link to account
+  loanType            String   @map("loan_type") // "mortgage" | "auto" | "personal"
+  loanNumber          String   @unique @map("loan_number")
+  outstandingBalance  Decimal  @map("outstanding_balance") @db.Decimal(15, 2)
+  interestRate        Decimal  @map("interest_rate") @db.Decimal(5, 4) // e.g., 3.75% = 0.0375
+  monthlyPayment      Decimal  @map("monthly_payment") @db.Decimal(15, 2)
+  remainingTermMonths Int      @map("remaining_term_months")
+  nextPaymentDate     DateTime @map("next_payment_date")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([loanType])
+  @@map("loans")
+}
+
+model Transaction {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  accountId        String    @map("account_id") // Source account
+  transactionType  String    @map("transaction_type") // "payment" | "transfer" | "deposit" | "withdrawal"
+  amount           Decimal   @db.Decimal(15, 2)
+  currency         String    @default("USD")
+  fromAccount      String?   @map("from_account") // Source account number (for display)
+  toAccount        String?   @map("to_account") // Destination account number or payment address
+  beneficiaryId    String?   @map("beneficiary_id") // Link to beneficiary if transfer to beneficiary
+  description      String?
+  status           String    @default("pending") // "pending" | "completed" | "failed" | "cancelled" | "expired"
+  referenceNumber  String?   @unique @map("reference_number")
+  paymentSessionId String?   @unique @map("payment_session_id") // Links to OTP session
+  expiresAt        DateTime? @map("expires_at") // Expiration time for pending transactions
+  completedAt      DateTime? @map("completed_at") // Completion timestamp
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  beneficiary Beneficiary? @relation(fields: [beneficiaryId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([beneficiaryId])
+  @@index([transactionType])
+  @@index([status])
+  @@index([paymentSessionId])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+model PaymentAlert {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  alertType String   @map("alert_type") // "payment_received" | "payment_sent" | "low_balance" | "high_balance"
+  threshold Decimal? @db.Decimal(15, 2) // For balance-based alerts
+  accountId String?  @map("account_id") // Optional: specific account
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([alertType])
+  @@index([isActive])
+  @@map("payment_alerts")
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  channel   String // "email" | "sms" | "push"
+  eventType String   @map("event_type") // "payment" | "alert" | "balance" | "transaction"
+  isEnabled Boolean  @default(true) @map("is_enabled")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel, eventType])
+  @@index([userId])
+  @@index([isEnabled])
+  @@map("notification_preferences")
 }

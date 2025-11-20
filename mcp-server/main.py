@@ -5,7 +5,6 @@ Exposes hardened, JWT-authenticated banking tools using FASTMCP.
 """
 
 import os
-import sys
 from dotenv import load_dotenv
 
 # Load environment variables from .env file immediately, before importing config
@@ -21,7 +20,7 @@ from typing import Optional, List
 
 from mcp_server.config import settings
 from mcp_server.auth import verify_jwt_token, User
-from mcp_server.banking_api import BankingAPI
+from banking_api import BankingAPI
 from mcp_server.cache import cache_manager
 from mcp_server.masking import mask_account_number, mask_merchant_info
 
@@ -69,6 +68,34 @@ def get_user_from_token(jwt_token: str, required_scope: str = "read") -> User:
     return User(user_id=user_id, scopes=scopes)
 
 
+def get_jwt_token_from_headers() -> Optional[str]:
+    """
+    Extract JWT token from HTTP headers.
+    
+    Looks for JWT token in:
+    1. Authorization header: "Bearer <token>"
+    2. X-JWT-Token header: "<token>"
+    
+    Returns:
+        JWT token string or None if not found
+    """
+    headers = get_http_headers()
+    
+    # Try Authorization header first (Bearer token)
+    jwt_token = None
+    auth_header = headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        jwt_token = auth_header[7:].strip()
+    elif auth_header.startswith("bearer "):
+        jwt_token = auth_header[7:].strip()
+    
+    # Fallback to X-JWT-Token header
+    if not jwt_token:
+        jwt_token = headers.get("x-jwt-token") or headers.get("X-JWT-Token")
+    
+    return jwt_token
+
+
 def get_user_from_headers(required_scope: str = "read") -> User:
     """
     Extract and validate user from JWT token in HTTP headers.
@@ -86,19 +113,7 @@ def get_user_from_headers(required_scope: str = "read") -> User:
     Raises:
         ValueError: If token is invalid, missing, or missing required scope
     """
-    headers = get_http_headers()
-    
-    # Try Authorization header first (Bearer token)
-    jwt_token = None
-    auth_header = headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        jwt_token = auth_header[7:].strip()
-    elif auth_header.startswith("bearer "):
-        jwt_token = auth_header[7:].strip()
-    
-    # Fallback to X-JWT-Token header
-    if not jwt_token:
-        jwt_token = headers.get("x-jwt-token") or headers.get("X-JWT-Token")
+    jwt_token = get_jwt_token_from_headers()
     
     if not jwt_token:
         raise ValueError("Missing JWT token in Authorization or X-JWT-Token header")
@@ -108,12 +123,14 @@ def get_user_from_headers(required_scope: str = "read") -> User:
 
 @mcp.tool()
 async def get_balance(
+    jwt_token: str,
     account_type: Optional[str] = None
 ) -> List[dict]:
     """
     Get account balances for the authenticated user.
     
     Args:
+        jwt_token: JWT authentication token with 'read' scope
         account_type: Optional account type filter (checking, savings, credit_card)
         
     Returns:
@@ -122,8 +139,8 @@ async def get_balance(
     logger.info("Balance request received")
     
     try:
-        # Authenticate user from HTTP headers
-        user = get_user_from_headers()
+        # Authenticate user from JWT token
+        user = get_user_from_token(jwt_token)
         logger.info(f"Balance request for user_id: {user.user_id}")
         
         # Check cache
@@ -133,35 +150,33 @@ async def get_balance(
             logger.info(f"Returning cached balance for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API
+        # Query banking API with JWT token
         banking_api = BankingAPI()
-        accounts = await banking_api.get_accounts(user.user_id)
-        
-        # Filter by account_type if specified
-        if account_type:
-            accounts = [
-                acc for acc in accounts
-                if acc.get("type", "").lower() == account_type.lower()
-            ]
+        balances_data = await banking_api.get_account_balances(
+            user.user_id,
+            account_type=account_type,
+            jwt_token=jwt_token
+        )
         
         # Build response with masking
         balances = []
-        for account in accounts:
-            acc_type = account.get("type", "unknown")
-            acc_number = account.get("account_number", "")
-            balance = account.get("balance", 0.0)
+        for balance_data in balances_data:
+            acc_type = balance_data.get("account_type", "unknown")
+            acc_number = balance_data.get("account_number", "")
+            balance = balance_data.get("balance", 0.0)
             
             response = {
                 "account_type": acc_type,
                 "account_number": mask_account_number(acc_number),
                 "balance": balance,
-                "currency": "USD"
+                "currency": balance_data.get("currency", "USD")
             }
             
             # Add credit card specific fields
             if acc_type == "credit_card":
-                response["credit_limit"] = account.get("limit", 0.0)
-                response["available_credit"] = account.get("limit", 0.0) - balance
+                credit_limit = balance_data.get("credit_limit", 0.0)
+                response["credit_limit"] = credit_limit
+                response["available_credit"] = balance_data.get("available_balance", credit_limit - balance)
             
             balances.append(response)
         
@@ -185,6 +200,7 @@ async def get_balance(
 
 @mcp.tool()
 async def get_transactions(
+    jwt_token: str,
     account_type: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -194,6 +210,7 @@ async def get_transactions(
     Get transaction history for the authenticated user.
     
     Args:
+        jwt_token: JWT authentication token with 'read' scope
         account_type: Optional account type filter
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
@@ -205,8 +222,8 @@ async def get_transactions(
     logger.info("Transaction request received")
     
     try:
-        # Authenticate user from HTTP headers
-        user = get_user_from_headers()
+        # Authenticate user from JWT token
+        user = get_user_from_token(jwt_token)
         logger.info(
             f"Transaction request for user_id: {user.user_id}, "
             f"limit: {limit}"
@@ -230,14 +247,15 @@ async def get_transactions(
             logger.info(f"Returning cached transactions for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API
+        # Query banking API with JWT token
         banking_api = BankingAPI()
         transactions = await banking_api.get_transactions(
             user.user_id,
             account_type=account_type,
             start_date=start_date,
             end_date=end_date,
-            limit=limit
+            limit=limit,
+            jwt_token=jwt_token
         )
         
         # Build response with masking
@@ -276,9 +294,12 @@ async def get_transactions(
 
 
 @mcp.tool()
-async def get_loans() -> List[dict]:
+async def get_loans(jwt_token: str) -> List[dict]:
     """
     Get loan information for the authenticated user.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
     
     Returns:
         List of loan responses with details and payment schedules
@@ -286,8 +307,8 @@ async def get_loans() -> List[dict]:
     logger.info("Loan request received")
     
     try:
-        # Authenticate user from HTTP headers
-        user = get_user_from_headers()
+        # Authenticate user from JWT token
+        user = get_user_from_token(jwt_token)
         logger.info(f"Loan request for user_id: {user.user_id}")
         
         # Check cache
@@ -297,9 +318,9 @@ async def get_loans() -> List[dict]:
             logger.info(f"Returning cached loans for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API
+        # Query banking API with JWT token
         banking_api = BankingAPI()
-        loans = await banking_api.get_loans(user.user_id)
+        loans = await banking_api.get_loans(user.user_id, jwt_token=jwt_token)
         
         # Build response with masking
         responses = []
@@ -366,14 +387,15 @@ async def make_payment(
             f"from: {from_account}, to: {to_account}, amount: {amount}"
         )
         
-        # Query banking API
+        # Query banking API with JWT token
         banking_api = BankingAPI()
         result = await banking_api.make_payment(
             user.user_id,
             from_account,
             to_account,
             amount,
-            description
+            description,
+            jwt_token=jwt_token
         )
         
         logger.info(
@@ -409,9 +431,10 @@ async def get_credit_limit(jwt_token: str) -> dict:
         user = get_user_from_token(jwt_token)
         logger.info(f"Credit limit request for user_id: {user.user_id}")
         
+        # Get JWT token from parameter
         # Get balances (specifically credit card)
         banking_api = BankingAPI()
-        accounts = await banking_api.get_accounts(user.user_id)
+        accounts = await banking_api.get_accounts(user.user_id, jwt_token=jwt_token)
         
         # Find credit card account
         credit_card = None
@@ -485,13 +508,14 @@ async def set_alert(
             f"type: {alert_type}"
         )
         
-        # Query banking API
+        # Query banking API with JWT token
         banking_api = BankingAPI()
         alert = await banking_api.set_alert(
             user.user_id,
             alert_type,
             description,
-            due_date if due_date else None
+            due_date if due_date else None,
+            jwt_token=jwt_token
         )
         
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
@@ -533,9 +557,9 @@ async def get_alerts(jwt_token: str) -> List[dict]:
         user = get_user_from_token(jwt_token)
         logger.info(f"Get alerts request for user_id: {user.user_id}")
         
-        # Query banking API
+        # Query banking API with JWT token
         banking_api = BankingAPI()
-        alerts = await banking_api.get_alerts(user.user_id)
+        alerts = await banking_api.get_alerts(user.user_id, jwt_token=jwt_token)
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
         
         if not alerts:
@@ -571,55 +595,6 @@ async def get_alerts(jwt_token: str) -> List[dict]:
     except Exception as e:
         logger.error(f"Error retrieving alerts: {e}")
         raise ValueError(f"Failed to retrieve alerts: {str(e)}")
-
-
-@mcp.tool()
-async def get_interest_rates(jwt_token: str) -> str:
-    """
-    Get current interest rates for various banking products.
-    
-    Args:
-        jwt_token: JWT authentication token with 'read' scope
-        
-    Returns:
-        Formatted string with interest rates
-    """
-    logger.info("Interest rates request received")
-    
-    try:
-        # Authenticate user
-        user = get_user_from_token(jwt_token)
-        logger.info(f"Interest rates request for user_id: {user.user_id}")
-        
-        # Return static interest rates (mock data)
-        return """Current Interest Rates (as of November 2025):
-
-💰 DEPOSIT ACCOUNTS:
-• Checking Account: 0.10% APY
-• Savings Account: 4.25% APY
-• Money Market: 4.50% APY
-• 12-Month CD: 5.00% APY
-• 24-Month CD: 4.75% APY
-
-💳 CREDIT PRODUCTS:
-• Credit Cards: 15.99% - 24.99% APR
-• Personal Loans: 5.99% - 18.99% APR
-• Auto Loans: 3.49% - 8.99% APR
-• Home Equity Line: 7.25% - 9.50% APR
-
-🏠 MORTGAGE RATES:
-• 30-Year Fixed: 7.125% APR
-• 15-Year Fixed: 6.625% APR
-• 5/1 ARM: 6.250% APR
-
-Rates are subject to change and based on creditworthiness. Contact us for personalized rates!"""
-        
-    except ValueError as e:
-        logger.warning(f"Authentication error: {e}")
-        raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving interest rates: {e}")
-        raise ValueError(f"Failed to retrieve interest rates: {str(e)}")
 
 
 @mcp.tool()

@@ -33,17 +33,25 @@ class MCPClient:
         logger.info(f"MCP Client initialized with JWT Secret: {masked_secret}, Issuer: {self.jwt_issuer}")
         
         # HTTP client with timeout and redirect following
+        # Configure with proper connection limits and keep-alive to prevent premature disconnections
         self.client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=httpx.Timeout(30.0, connect=10.0, read=30.0, write=10.0, pool=5.0),
             base_url=self.mcp_url,
-            follow_redirects=True  # Follow redirects (e.g., /mcp/ -> /mcp)
+            follow_redirects=True,  # Follow redirects (e.g., /mcp/ -> /mcp)
+            limits=httpx.Limits(
+                max_keepalive_connections=10,
+                max_connections=20,
+                keepalive_expiry=30.0
+            ),
+            http2=False  # Disable HTTP/2 to avoid streaming issues
         )
     
     def _generate_jwt(
         self,
         user_id: str,
         scopes: List[str],
-        session_id: str
+        session_id: str,
+        email: Optional[str] = None
     ) -> str:
         """
         Generate short-lived JWT token for MCP server.
@@ -52,6 +60,7 @@ class MCPClient:
             user_id: User identifier
             scopes: List of scopes (e.g., ['read'], ['transact'], ['configure'])
             session_id: Session/room identifier
+            email: User email address (optional but recommended)
             
         Returns:
             JWT token string
@@ -60,7 +69,9 @@ class MCPClient:
         payload = {
             "iss": self.jwt_issuer,
             "sub": user_id,
-            "scopes": scopes,
+            "scopes": scopes,  # Keep for MCP server compatibility
+            "permissions": scopes,  # Map scopes to permissions for Next.js API
+            "roles": ["customer"],  # Default role for Next.js API
             "session_id": session_id,
             "iat": now,
             "exp": now + timedelta(minutes=5),  # 5 minute expiration
@@ -72,6 +83,13 @@ class MCPClient:
         # We'll include both sub and user_id claim for compatibility
         if "-" in str(user_id):
              payload["user_id"] = user_id
+        
+        # Include email if provided (required by Next.js API)
+        if email:
+            payload["email"] = email
+        else:
+            # Fallback email if not provided (Next.js requires email)
+            payload["email"] = f"user_{user_id}@example.com"
 
         token = jwt.encode(
             payload,
@@ -79,7 +97,7 @@ class MCPClient:
             algorithm=self.jwt_algorithm
         )
         
-        logger.debug(f"Generated JWT for user_id: {user_id}, scopes: {scopes}")
+        logger.debug(f"Generated JWT for user_id: {user_id}, email: {payload.get('email')}, scopes: {scopes}, permissions: {scopes}")
         return token
     
     async def _call_mcp_tool(
@@ -88,6 +106,7 @@ class MCPClient:
         user_id: str,
         session_id: str,
         scopes: List[str],
+        email: Optional[str] = None,
         **kwargs
     ) -> Any:
         """
@@ -98,12 +117,13 @@ class MCPClient:
             user_id: User identifier
             session_id: Session/room identifier
             scopes: Required scopes for this operation
+            email: User email address (optional but recommended)
             **kwargs: Tool-specific parameters
             
         Returns:
             Tool response
         """
-        jwt_token = self._generate_jwt(user_id, scopes, session_id)
+        jwt_token = self._generate_jwt(user_id, scopes, session_id, email=email)
         
         # Build tool arguments
         # Include jwt_token in arguments for tools that require it as a parameter
@@ -137,6 +157,8 @@ class MCPClient:
                 "X-JWT-Token": jwt_token  # Fallback header
             }
             
+            # Make request and ensure full response is consumed
+            # This prevents the connection from closing before the server finishes writing
             response = await self.client.post(
                 "",
                 json=jsonrpc_request,
@@ -149,8 +171,18 @@ class MCPClient:
             
             response.raise_for_status()
             
+            # Read the full response content
+            # Using .text property reads the entire response body synchronously
+            # This ensures all data is received before the connection can be closed
+            # The response object will be automatically cleaned up after we're done
+            response_text = response.text
+            
             # Parse JSON-RPC response
-            jsonrpc_response = response.json()
+            try:
+                jsonrpc_response = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON response: {e}, response text: {response_text[:200]}")
+                raise ValueError(f"Invalid JSON response from MCP server: {e}")
             
             # Check for JSON-RPC errors
             if "error" in jsonrpc_response:

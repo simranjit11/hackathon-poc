@@ -102,6 +102,96 @@ class BackendAPIClient:
             logger.error(f"Backend API request failed: {e}")
             return [] # Return empty list on error to fail gracefully
     
+    async def get_banking_accounts(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get banking accounts for a user (server-to-server).
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            List of account dictionaries
+        """
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+        
+        try:
+            response = await self.client.get(
+                f"/api/internal/banking/accounts/{user_id}"
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("data", [])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise ValueError(f"User {user_id} not found")
+            elif e.response.status_code == 401:
+                raise ValueError("Invalid API key for backend API")
+            else:
+                logger.error(f"Backend API error: {e}")
+                raise ValueError(f"Failed to fetch accounts: {str(e)}")
+        except httpx.HTTPError as e:
+            logger.error(f"Backend API request failed: {e}")
+            raise ValueError(f"Failed to connect to backend API: {str(e)}")
+    
+    async def get_banking_transactions(
+        self,
+        user_id: str,
+        account_type: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Get banking transactions for a user (server-to-server).
+        
+        Args:
+            user_id: User identifier
+            account_type: Optional account type filter
+            start_date: Optional start date filter
+            end_date: Optional end date filter
+            limit: Maximum number of transactions
+            offset: Pagination offset
+            
+        Returns:
+            Dictionary with data and meta keys
+        """
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+        
+        try:
+            params = []
+            if account_type:
+                params.append(f"accountType={account_type}")
+            if start_date:
+                params.append(f"startDate={start_date}")
+            if end_date:
+                params.append(f"endDate={end_date}")
+            if limit:
+                params.append(f"limit={limit}")
+            if offset:
+                params.append(f"offset={offset}")
+            
+            url = f"/api/internal/banking/transactions/{user_id}"
+            if params:
+                url += "?" + "&".join(params)
+            
+            response = await self.client.get(url)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise ValueError(f"User {user_id} not found")
+            elif e.response.status_code == 401:
+                raise ValueError("Invalid API key for backend API")
+            else:
+                logger.error(f"Backend API error: {e}")
+                raise ValueError(f"Failed to fetch transactions: {str(e)}")
+        except httpx.HTTPError as e:
+            logger.error(f"Backend API request failed: {e}")
+            raise ValueError(f"Failed to connect to backend API: {str(e)}")
+    
     async def close(self):
         """Close HTTP client."""
         await self.client.aclose()

@@ -52,9 +52,10 @@ class Assistant(Agent):
         # MCP client for calling banking tools
         self.mcp_client = get_mcp_client()
         
-        # Store user_id and session_id for MCP calls
+        # Store user_id, email, and session_id for MCP calls
         # These will be set when the agent session starts
         self.user_id: Optional[str] = None
+        self.email: Optional[str] = None
         self.session_id: Optional[str] = None
         
         # Agno agent will be initialized when user context is available
@@ -70,7 +71,11 @@ class Assistant(Agent):
         """Initialize Agno agent with MCP server tools when user context is available."""
         if self.agno_agent is None and self.user_id and self.session_id:
             # Create MCP tools wrapper
-            mcp_tools_wrapper = create_agno_mcp_tools(self.user_id, self.session_id)
+            mcp_tools_wrapper = create_agno_mcp_tools(
+                self.user_id, 
+                self.session_id,
+                self.email
+            )
             
             # Get list of Function objects (these use our HTTP client with JWT)
             mcp_tools = mcp_tools_wrapper.get_tools()
@@ -328,8 +333,9 @@ async def entrypoint(ctx: agents.JobContext):
     # Set user context for MCP calls
     if user_id:
         assistant.user_id = user_id
+        assistant.email = email or f"user_{user_id}@example.com"
         assistant.session_id = room_name
-        logger.info(f"Set agent context: user_id={user_id}, session_id={room_name}")
+        logger.info(f"Set agent context: user_id={user_id}, email={assistant.email}, session_id={room_name}")
 
     # Create agent session
     # Note: Using VAD (Voice Activity Detection) for turn detection instead of MultilingualModel
