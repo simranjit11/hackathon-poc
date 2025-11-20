@@ -97,7 +97,7 @@ export function userToIdentity(user: User): UserIdentity {
 }
 
 /**
- * Creates a new user
+ * Creates a new user with default beneficiaries
  * 
  * @param email - User email
  * @param password - Plain text password
@@ -129,6 +129,31 @@ export async function createUser(
         roles,
         permissions,
         name,
+        beneficiaries: {
+            create: [
+                {
+                    nickname: 'Mom',
+                    fullName: 'Mother',
+                    paymentAddress: 'mom@upi',
+                    paymentType: 'upi',
+                    bankName: 'Family Bank',
+                },
+                {
+                    nickname: 'Bob',
+                    fullName: 'Bob Builder',
+                    paymentAddress: 'bob@upi',
+                    paymentType: 'upi',
+                    bankName: 'Construction Bank',
+                },
+                {
+                    nickname: 'Joe',
+                    fullName: 'Joe Average',
+                    paymentAddress: 'joe@upi',
+                    paymentType: 'upi',
+                    bankName: 'Regular Bank',
+                }
+            ]
+        }
       },
     });
   } catch (error) {

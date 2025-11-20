@@ -4,7 +4,7 @@ import { findUserById } from '@/lib/users';
 import { corsResponse, corsPreflight } from '@/lib/cors';
 
 /**
- * GET /api/internal/users/[user_id]
+ * GET /api/internal/users/[id]
  * 
  * Server-to-server endpoint to get user details by user_id.
  * Requires API key authentication (X-API-Key header).
@@ -14,7 +14,7 @@ import { corsResponse, corsPreflight } from '@/lib/cors';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { user_id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -28,7 +28,7 @@ export async function GET(
   }
 
   try {
-    const { user_id } = params;
+    const { id: user_id } = await params;
 
     if (!user_id) {
       return corsResponse(

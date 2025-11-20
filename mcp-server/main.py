@@ -714,6 +714,45 @@ async def get_current_date_time(jwt_token: str) -> str:
         raise ValueError(f"Failed to retrieve date/time: {str(e)}")
 
 
+@mcp.tool()
+async def get_transfer_contacts(jwt_token: str) -> List[dict]:
+    """
+    Get list of saved contacts/beneficiaries for transfers.
+    Useful for resolving names like "Pay Bob" to actual payment details.
+    
+    Args:
+        jwt_token: JWT authentication token with 'read' scope
+        
+    Returns:
+        List of beneficiary dictionaries with nickname and payment details
+    """
+    logger.info("Get transfer contacts request received")
+    
+    try:
+        # Authenticate user
+        user = get_user_from_token(jwt_token)
+        logger.info(f"Get contacts request for user_id: {user.user_id}")
+        
+        # Fetch beneficiaries from backend API
+        from backend_client import get_backend_client
+        backend_client = get_backend_client()
+        beneficiaries = await backend_client.get_beneficiaries(user.user_id)
+        
+        logger.info(
+            f"Contacts retrieved for user_id: {user.user_id}, "
+            f"count: {len(beneficiaries)}"
+        )
+        
+        return beneficiaries
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving contacts: {e}")
+        raise ValueError(f"Failed to retrieve contacts: {str(e)}")
+
+
 if __name__ == "__main__":
     logger.info(
         f"Starting MCP Banking Tools Server with HTTP transport "

@@ -1,7 +1,7 @@
 # Real-Time Banking Voice Agent - Complete Architecture Document
 
-**Version:** 1.0  
-**Last Updated:** 2025-01-XX  
+**Version:** 1.1  
+**Last Updated:** 2025-11-20  
 **Status:** Architecture Specification
 
 ---
@@ -82,6 +82,7 @@ A real-time banking voice assistant enabling customers to interact with banking 
 - **Shared Backend Schema**: All backends use identical elicitation schema; clients implement platform-specific rendering
 - **Redis Session State**: Fast session recovery and state management
 - **Postgres Audit Trail**: Persistent, queryable audit logs for compliance
+- **System of Record for Contacts**: Next.js backend owns user beneficiaries/contacts; MCP tools fetch this data via internal API.
 
 ---
 
@@ -121,6 +122,7 @@ orchestrator/
 - Elicitation creation
 - Risk assessment
 - Tool suspension/resumption
+- **Beneficiary Lookup (Proxy to Next.js)**
 
 **Endpoints:**
 ```
@@ -131,6 +133,7 @@ POST /mcp/payment            # Initiate payment
 POST /mcp/payment/resume     # Resume payment with elicitation
 POST /mcp/alerts             # Manage alerts
 POST /mcp/elicitation/{id}/cancel  # Cancel elicitation
+POST /mcp/beneficiaries      # Get user transfer contacts
 ```
 
 ### Auth Server (Next.js API Routes)
@@ -141,6 +144,7 @@ POST /mcp/elicitation/{id}/cancel  # Cancel elicitation
 - Token validation and refresh
 - Biometric token validation (mobile)
 - 2FA OTP generation and verification (web)
+- **Beneficiary Management (CRUD)**
 
 **Implementation:**
 - Integrated as Next.js API routes (not separate microservice)
@@ -154,6 +158,7 @@ POST /api/auth/logout         # Invalidate session
 GET  /api/auth/me             # Validate token, return user info
 POST /api/auth/2fa/send       # Send OTP (web)
 POST /api/auth/2fa/verify     # Verify OTP (web)
+GET  /api/internal/users/{id}/beneficiaries # Internal API for MCP
 ```
 
 ### Client Applications
@@ -501,26 +506,29 @@ redis.hset(
 ### Journey 2: Transactional Payments & Transfers
 
 **Flow:**
-1. User requests transfer/payment
+1. User requests transfer/payment ("Pay Bob")
 2. Client → LiveKit: Audio stream
 3. LiveKit → Orchestrator: Audio packets
 4. Orchestrator → STT: Stream audio
 5. STT → Orchestrator: Transcript fragments
 6. Orchestrator: Inline Presidio mask
 7. Orchestrator → LLM: Prompt with policy state
-8. LLM → Orchestrator: Tool call plan
-9. Orchestrator → MCP: Initiate payment request with JWT + risk attrs
-10. MCP → Orchestrator: `create_elicitation` (needs OTP/confirmation)
-11. Orchestrator → Client: Elicitation schema via LiveKit data channel
-12. Client → User: Render confirmation/OTP prompt
-13. User → Client: Provide confirmation / OTP
-14. Client → Orchestrator: Resolve elicitation payload
-15. Orchestrator → MCP: Resume tool with user input
-16. MCP → Orchestrator: Final confirmation JSON (masked)
-17. Orchestrator → TTS: Narration request
-18. TTS → LiveKit: Audio response
-19. LiveKit → Client: Streamed confirmation
-20. Client → User: Audio + receipt UI
+8. LLM → Orchestrator: `get_transfer_contacts` tool call
+9. MCP → Backend API: Fetch beneficiaries
+10. MCP → Orchestrator: Returns list (Bob -> bob@upi)
+11. LLM → Orchestrator: `make_payment` tool call (to: bob@upi)
+12. Orchestrator → MCP: Initiate payment request with JWT + risk attrs
+13. MCP → Orchestrator: `create_elicitation` (needs OTP/confirmation)
+14. Orchestrator → Client: Elicitation schema via LiveKit data channel
+15. Client → User: Render confirmation/OTP prompt
+16. User → Client: Provide confirmation / OTP
+17. Client → Orchestrator: Resolve elicitation payload
+18. Orchestrator → MCP: Resume tool with user input
+19. MCP → Orchestrator: Final confirmation JSON (masked)
+20. Orchestrator → TTS: Narration request
+21. TTS → LiveKit: Audio response
+22. LiveKit → Client: Streamed confirmation
+23. Client → User: Audio + receipt UI
 
 **Security Controls:**
 - MFA enforced by policy
@@ -1031,9 +1039,36 @@ Content-Type: application/json
 }
 ```
 
+**Get Beneficiaries:**
+```http
+POST /mcp/beneficiaries
+Authorization: Bearer <jwt>
+```
+
 ---
 
 ## Data Models & Schemas
+
+### Beneficiary Model (Next.js Prisma)
+
+```prisma
+model Beneficiary {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  nickname       String   // e.g. "Mom", "Landlord"
+  fullName       String   @map("full_name")
+  paymentAddress String   @map("payment_address") // UPI ID or Account Number
+  paymentType    String   @map("payment_type")    // "upi" or "account"
+  bankName       String?  @map("bank_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, nickname])
+  @@map("beneficiaries")
+}
+```
 
 ### Elicitation Request Schema
 
@@ -1158,4 +1193,3 @@ This architecture document provides a comprehensive specification for the Real-T
 
 **Document Status:** Ready for Implementation  
 **Next Steps:** Begin implementation following the user stories breakdowns
-

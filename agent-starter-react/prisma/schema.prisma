@@ -20,9 +20,26 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
   lastLoginAt   DateTime? @map("last_login_at")
+  beneficiaries Beneficiary[]
 
   @@map("users")
   @@index([email])
   @@index([createdAt])
 }
 
+model Beneficiary {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  nickname       String   // e.g. "Mom", "Landlord"
+  fullName       String   @map("full_name")
+  paymentAddress String   @map("payment_address") // UPI ID or Account Number
+  paymentType    String   @map("payment_type")    // "upi" or "account"
+  bankName       String?  @map("bank_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, nickname]) // Prevent duplicate nicknames for same user
+  @@map("beneficiaries")
+}

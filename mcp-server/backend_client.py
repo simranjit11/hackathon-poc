@@ -8,7 +8,7 @@ Uses API key authentication for secure backend-to-backend calls.
 import os
 import httpx
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,21 @@ class BackendAPIClient:
         except httpx.HTTPError as e:
             logger.error(f"Backend API request failed: {e}")
             raise ValueError(f"Failed to connect to backend API: {str(e)}")
+    
+    async def get_beneficiaries(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get user beneficiaries from backend API."""
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+            
+        try:
+            response = await self.client.get(
+                f"/api/internal/users/{user_id}/beneficiaries"
+            )
+            response.raise_for_status()
+            return response.json().get("beneficiaries", [])
+        except httpx.HTTPError as e:
+            logger.error(f"Backend API request failed: {e}")
+            return [] # Return empty list on error to fail gracefully
     
     async def close(self):
         """Close HTTP client."""
