@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
+    # Cashfree Payment Gateway settings
+    cashfree_app_id: str = ""
+    cashfree_secret_key: str = ""
+    cashfree_env: str = "TEST"  # TEST or PRODUCTION
+    
     if SettingsConfigDict:
         model_config = SettingsConfigDict(
             env_file=".env",
@@ -74,6 +79,9 @@ class Settings(BaseSettings):
             "REDIS_URL": "redis_url",
             "LOG_LEVEL": "log_level",
             "CORS_ORIGINS": "cors_origins",
+            "CASHFREE_APP_ID": "cashfree_app_id",
+            "CASHFREE_SECRET_KEY": "cashfree_secret_key",
+            "CASHFREE_ENV": "cashfree_env",
         }
         
         # Override with environment variables
@@ -151,6 +159,18 @@ class Settings(BaseSettings):
     @property
     def LOG_LEVEL(self) -> str:
         return self.log_level
+    
+    @property
+    def CASHFREE_APP_ID(self) -> str:
+        return self.cashfree_app_id
+    
+    @property
+    def CASHFREE_SECRET_KEY(self) -> str:
+        return self.cashfree_secret_key
+    
+    @property
+    def CASHFREE_ENV(self) -> str:
+        return self.cashfree_env
 
 
 settings = Settings()

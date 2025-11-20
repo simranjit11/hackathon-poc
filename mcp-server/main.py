@@ -24,6 +24,7 @@ from mcp_server.auth import verify_jwt_token, User
 from mcp_server.banking_api import BankingAPI
 from mcp_server.cache import cache_manager
 from mcp_server.masking import mask_account_number, mask_merchant_info
+from mcp_server.cashfree_payment import CashfreePaymentService
 
 # Configure logging
 logging.basicConfig(
@@ -712,6 +713,211 @@ async def get_current_date_time(jwt_token: str) -> str:
     except Exception as e:
         logger.error(f"Error retrieving date/time: {e}")
         raise ValueError(f"Failed to retrieve date/time: {str(e)}")
+
+
+@mcp.tool()
+async def create_cashfree_order(
+    amount: float,
+    customer_name: str,
+    customer_email: str,
+    customer_phone: str,
+    order_note: Optional[str] = None,
+    return_url: Optional[str] = None,
+    jwt_token: str = ""
+) -> str:
+    """
+    Create a Cashfree payment order for processing payments.
+    
+    Args:
+        amount: Order amount in INR (minimum 1.00)
+        customer_name: Customer's full name
+        customer_email: Customer's email address
+        customer_phone: Customer's phone number (10 digits)
+        order_note: Optional description/note for the order
+        return_url: Optional URL to redirect after payment completion
+        jwt_token: JWT token for authentication (requires 'transact' scope)
+        
+    Returns:
+        JSON string with order details including payment_session_id for processing payment
+        
+    Raises:
+        ValueError: If authentication fails or order creation fails
+    """
+    import json
+    
+    logger.info("Cashfree order creation request received")
+    
+    try:
+        # Authenticate user with 'transact' scope
+        user = get_user_from_token(jwt_token, required_scope="transact")
+        
+        logger.info(
+            f"Creating Cashfree order for user_id: {user.user_id}, "
+            f"amount: ₹{amount}, customer: {customer_name}"
+        )
+        
+        # Validate amount
+        if amount < 1.0:
+            raise ValueError("Order amount must be at least ₹1.00")
+        
+        # Initialize Cashfree service
+        cashfree_service = CashfreePaymentService()
+        
+        # Create order
+        result = await cashfree_service.create_order(
+            amount=amount,
+            customer_id=user.user_id,
+            customer_name=customer_name,
+            customer_email=customer_email,
+            customer_phone=customer_phone,
+            order_note=order_note,
+            return_url=return_url or "https://www.cashfree.com/devstudio/preview/pg/web/checkout",
+            order_tags={
+                "user_id": user.user_id,
+                "created_via": "mcp_server"
+            }
+        )
+        
+        if result.get("success"):
+            logger.info(
+                f"Cashfree order created successfully for user_id: {user.user_id}, "
+                f"order_id: {result.get('order_id')}"
+            )
+            return json.dumps(result, indent=2)
+        else:
+            error_msg = result.get("error", "Unknown error")
+            logger.error(f"Cashfree order creation failed: {error_msg}")
+            raise ValueError(f"Order creation failed: {error_msg}")
+        
+    except ValueError as e:
+        logger.warning(f"Cashfree order error: {e}")
+        raise ValueError(f"Order creation failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error creating Cashfree order: {e}")
+        raise ValueError(f"Failed to create order: {str(e)}")
+
+
+@mcp.tool()
+async def get_cashfree_order_status(
+    order_id: str,
+    jwt_token: str = ""
+) -> str:
+    """
+    Get the status and details of a Cashfree payment order.
+    
+    Args:
+        order_id: The Cashfree order ID to check
+        jwt_token: JWT token for authentication (requires 'read' scope)
+        
+    Returns:
+        JSON string with order status and details
+        
+    Raises:
+        ValueError: If authentication fails or status retrieval fails
+    """
+    import json
+    
+    logger.info(f"Cashfree order status request for order_id: {order_id}")
+    
+    try:
+        # Authenticate user with 'read' scope
+        user = get_user_from_token(jwt_token, required_scope="read")
+        
+        logger.info(f"Fetching Cashfree order status for user_id: {user.user_id}, order_id: {order_id}")
+        
+        # Initialize Cashfree service
+        cashfree_service = CashfreePaymentService()
+        
+        # Get order status
+        result = await cashfree_service.get_order_status(order_id)
+        
+        if result.get("success"):
+            logger.info(f"Order status retrieved: {result.get('order_status')}")
+            return json.dumps(result, indent=2)
+        else:
+            error_msg = result.get("error", "Unknown error")
+            logger.error(f"Failed to fetch order status: {error_msg}")
+            raise ValueError(f"Failed to get order status: {error_msg}")
+        
+    except ValueError as e:
+        logger.warning(f"Order status error: {e}")
+        raise ValueError(f"Failed to get order status: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error fetching order status: {e}")
+        raise ValueError(f"Failed to fetch order status: {str(e)}")
+
+
+@mcp.tool()
+async def create_cashfree_refund(
+    order_id: str,
+    refund_amount: float,
+    refund_note: Optional[str] = None,
+    jwt_token: str = ""
+) -> str:
+    """
+    Create a refund for a Cashfree payment order.
+    
+    Args:
+        order_id: The Cashfree order ID to refund
+        refund_amount: Amount to refund (must be <= order amount)
+        refund_note: Optional note describing the refund reason
+        jwt_token: JWT token for authentication (requires 'transact' scope)
+        
+    Returns:
+        JSON string with refund details
+        
+    Raises:
+        ValueError: If authentication fails or refund creation fails
+    """
+    import json
+    from datetime import datetime
+    
+    logger.info(f"Cashfree refund request for order_id: {order_id}, amount: ₹{refund_amount}")
+    
+    try:
+        # Authenticate user with 'transact' scope
+        user = get_user_from_token(jwt_token, required_scope="transact")
+        
+        logger.info(
+            f"Creating Cashfree refund for user_id: {user.user_id}, "
+            f"order_id: {order_id}, amount: ₹{refund_amount}"
+        )
+        
+        # Validate refund amount
+        if refund_amount <= 0:
+            raise ValueError("Refund amount must be greater than 0")
+        
+        # Initialize Cashfree service
+        cashfree_service = CashfreePaymentService()
+        
+        # Generate unique refund ID
+        refund_id = f"refund_{user.user_id}_{int(datetime.now().timestamp())}"
+        
+        # Create refund
+        result = await cashfree_service.create_refund(
+            order_id=order_id,
+            refund_amount=refund_amount,
+            refund_id=refund_id,
+            refund_note=refund_note or "Refund requested by user"
+        )
+        
+        if result.get("success"):
+            logger.info(
+                f"Refund created successfully for user_id: {user.user_id}, "
+                f"refund_id: {result.get('refund_id')}"
+            )
+            return json.dumps(result, indent=2)
+        else:
+            error_msg = result.get("error", "Unknown error")
+            logger.error(f"Refund creation failed: {error_msg}")
+            raise ValueError(f"Refund creation failed: {error_msg}")
+        
+    except ValueError as e:
+        logger.warning(f"Refund error: {e}")
+        raise ValueError(f"Refund creation failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error creating refund: {e}")
+        raise ValueError(f"Failed to create refund: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,323 @@
+"""
+Cashfree Payment Gateway Integration
+=====================================
+Service for handling Cashfree payment operations including order creation,
+payment verification, status checks, and refunds.
+"""
+
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime
+from cashfree_pg import Cashfree
+from cashfree_pg.models.create_order_request import CreateOrderRequest
+from cashfree_pg.models.customer_details import CustomerDetails
+from cashfree_pg.models.order_meta import OrderMeta
+from cashfree_pg.api_client import ApiException
+
+from mcp_server.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class CashfreePaymentService:
+    """
+    Service class for Cashfree Payment Gateway operations.
+    
+    Provides methods for:
+    - Creating payment orders
+    - Verifying payment status
+    - Getting payment details
+    - Processing refunds
+    """
+    
+    def __init__(self):
+        """Initialize Cashfree Payment Gateway client."""
+        # Set Cashfree configuration
+        Cashfree.XClientId = settings.CASHFREE_APP_ID
+        Cashfree.XClientSecret = settings.CASHFREE_SECRET_KEY
+        Cashfree.XEnvironment = Cashfree.SANDBOX if settings.CASHFREE_ENV == "TEST" else Cashfree.PRODUCTION
+        
+        logger.info(f"Cashfree Payment Service initialized in {settings.CASHFREE_ENV} mode")
+    
+    async def create_order(
+        self,
+        amount: float,
+        customer_id: str,
+        customer_name: str,
+        customer_email: str,
+        customer_phone: str,
+        order_currency: str = "INR",
+        order_note: Optional[str] = None,
+        return_url: Optional[str] = None,
+        notify_url: Optional[str] = None,
+        order_tags: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a Cashfree payment order.
+        
+        Args:
+            amount: Order amount (minimum 1.00 INR)
+            customer_id: Unique customer identifier
+            customer_name: Customer name
+            customer_email: Customer email
+            customer_phone: Customer phone number
+            order_currency: Currency code (default: INR)
+            order_note: Optional order note/description
+            return_url: URL to redirect after payment
+            notify_url: Webhook URL for payment notifications
+            order_tags: Additional metadata tags
+            
+        Returns:
+            Dict containing:
+                - order_id: Cashfree order ID
+                - payment_session_id: Session ID for payment
+                - order_status: Current order status
+                - order_amount: Order amount
+                - order_currency: Order currency
+                
+        Raises:
+            Exception: If order creation fails
+        """
+        try:
+            logger.info(f"Creating Cashfree order for customer {customer_id}, amount: {amount} {order_currency}")
+            
+            # Generate unique order ID
+            order_id = f"order_{customer_id}_{int(datetime.now().timestamp())}"
+            
+            # Create customer details
+            customer_details = CustomerDetails(
+                customer_id=customer_id,
+                customer_name=customer_name,
+                customer_email=customer_email,
+                customer_phone=customer_phone
+            )
+            
+            # Create order request
+            create_order_request = CreateOrderRequest(
+                order_id=order_id,
+                order_amount=amount,
+                order_currency=order_currency,
+                customer_details=customer_details
+            )
+            
+            # Add optional fields
+            if order_note:
+                create_order_request.order_note = order_note
+            
+            if return_url:
+                create_order_request.order_meta = OrderMeta(
+                    return_url=return_url,
+                    notify_url=notify_url
+                )
+            
+            if order_tags:
+                create_order_request.order_tags = order_tags
+            
+            # Create order via Cashfree API
+            api_response = Cashfree().PGCreateOrder(
+                settings.CASHFREE_API_VERSION,
+                create_order_request
+            )
+            
+            logger.info(f"Order created successfully: {order_id}")
+            
+            return {
+                "success": True,
+                "order_id": api_response.data.order_id,
+                "payment_session_id": api_response.data.payment_session_id,
+                "order_status": api_response.data.order_status,
+                "order_amount": api_response.data.order_amount,
+                "order_currency": api_response.data.order_currency,
+                "cf_order_id": api_response.data.cf_order_id,
+                "created_at": api_response.data.created_at,
+                "order_expiry_time": api_response.data.order_expiry_time
+            }
+            
+        except ApiException as e:
+            logger.error(f"Cashfree API error creating order: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_code": getattr(e, 'status', 'unknown')
+            }
+        except Exception as e:
+            logger.error(f"Error creating Cashfree order: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """
+        Get the status of a Cashfree order.
+        
+        Args:
+            order_id: Cashfree order ID
+            
+        Returns:
+            Dict containing order status details
+            
+        Raises:
+            Exception: If status retrieval fails
+        """
+        try:
+            logger.info(f"Fetching order status for: {order_id}")
+            
+            # Get order details
+            api_response = Cashfree().PGFetchOrder(
+                settings.CASHFREE_API_VERSION,
+                order_id
+            )
+            
+            order_data = api_response.data
+            
+            return {
+                "success": True,
+                "order_id": order_data.order_id,
+                "cf_order_id": order_data.cf_order_id,
+                "order_status": order_data.order_status,
+                "order_amount": order_data.order_amount,
+                "order_currency": order_data.order_currency,
+                "order_note": order_data.order_note if hasattr(order_data, 'order_note') else None,
+                "created_at": order_data.created_at,
+                "customer_details": {
+                    "customer_id": order_data.customer_details.customer_id,
+                    "customer_name": order_data.customer_details.customer_name,
+                    "customer_email": order_data.customer_details.customer_email,
+                    "customer_phone": order_data.customer_details.customer_phone
+                }
+            }
+            
+        except ApiException as e:
+            logger.error(f"Cashfree API error fetching order status: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_code": getattr(e, 'status', 'unknown')
+            }
+        except Exception as e:
+            logger.error(f"Error fetching order status: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def get_payment_details(self, order_id: str, cf_payment_id: str) -> Dict[str, Any]:
+        """
+        Get detailed payment information for an order.
+        
+        Args:
+            order_id: Cashfree order ID
+            cf_payment_id: Cashfree payment ID
+            
+        Returns:
+            Dict containing payment details
+            
+        Raises:
+            Exception: If payment details retrieval fails
+        """
+        try:
+            logger.info(f"Fetching payment details for order: {order_id}, payment: {cf_payment_id}")
+            
+            # Get payment details
+            api_response = Cashfree().PGOrderFetchPayment(
+                settings.CASHFREE_API_VERSION,
+                order_id,
+                cf_payment_id
+            )
+            
+            payment_data = api_response.data
+            
+            return {
+                "success": True,
+                "cf_payment_id": payment_data.cf_payment_id,
+                "order_id": payment_data.order_id,
+                "payment_status": payment_data.payment_status,
+                "payment_amount": payment_data.payment_amount,
+                "payment_currency": payment_data.payment_currency,
+                "payment_time": payment_data.payment_time if hasattr(payment_data, 'payment_time') else None,
+                "payment_method": payment_data.payment_group if hasattr(payment_data, 'payment_group') else None
+            }
+            
+        except ApiException as e:
+            logger.error(f"Cashfree API error fetching payment details: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_code": getattr(e, 'status', 'unknown')
+            }
+        except Exception as e:
+            logger.error(f"Error fetching payment details: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def create_refund(
+        self,
+        order_id: str,
+        refund_amount: float,
+        refund_id: str,
+        refund_note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a refund for a payment.
+        
+        Args:
+            order_id: Cashfree order ID
+            refund_amount: Amount to refund
+            refund_id: Unique refund identifier
+            refund_note: Optional refund note
+            
+        Returns:
+            Dict containing refund details
+            
+        Raises:
+            Exception: If refund creation fails
+        """
+        try:
+            logger.info(f"Creating refund for order: {order_id}, amount: {refund_amount}")
+            
+            from cashfree_pg.models.create_refund_request import CreateRefundRequest
+            
+            refund_request = CreateRefundRequest(
+                refund_amount=refund_amount,
+                refund_id=refund_id,
+                refund_note=refund_note
+            )
+            
+            # Create refund via Cashfree API
+            api_response = Cashfree().PGOrderCreateRefund(
+                settings.CASHFREE_API_VERSION,
+                order_id,
+                refund_request
+            )
+            
+            refund_data = api_response.data
+            
+            logger.info(f"Refund created successfully: {refund_id}")
+            
+            return {
+                "success": True,
+                "cf_refund_id": refund_data.cf_refund_id,
+                "refund_id": refund_data.refund_id,
+                "order_id": refund_data.order_id,
+                "refund_amount": refund_data.refund_amount,
+                "refund_status": refund_data.refund_status,
+                "refund_note": refund_data.refund_note if hasattr(refund_data, 'refund_note') else None,
+                "created_at": refund_data.created_at if hasattr(refund_data, 'created_at') else None
+            }
+            
+        except ApiException as e:
+            logger.error(f"Cashfree API error creating refund: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_code": getattr(e, 'status', 'unknown')
+            }
+        except Exception as e:
+            logger.error(f"Error creating refund: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

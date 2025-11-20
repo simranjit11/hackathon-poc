@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
+    # Cashfree Payment Gateway settings
+    CASHFREE_APP_ID: str = os.getenv("CASHFREE_APP_ID", "")
+    CASHFREE_SECRET_KEY: str = os.getenv("CASHFREE_SECRET_KEY", "")
+    CASHFREE_API_VERSION: str = os.getenv("CASHFREE_API_VERSION", "2023-08-01")
+    CASHFREE_ENV: str = os.getenv("CASHFREE_ENV", "TEST")  # TEST or PROD
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
