@@ -129,3 +129,102 @@ Journey 2 (Transactional):
 2. 2.6 Receipt Display (after 2.5)
 
 ---
+
+## Mock Bank APIs Stories (3.0-3.9)
+
+### Epic 1: Database Schema and Foundation
+**Story 3.0: Banking Database Schema**
+- **Dependencies**: None (foundation story)
+- **Blocks**: All other banking stories (3.1-3.9)
+- **Can Start**: Immediately
+- **Status**: Prerequisite for all banking API stories
+
+### Epic 2: Account and Balance Read Operations
+**Story 3.1: Account Details API**
+- **Dependencies**: 3.0 (Database Schema)
+- **Blocks**: 3.2, 3.5 (Payment Initiation needs accounts)
+- **Can Start**: After 3.0
+- **Parallel Development**: Can work in parallel with 3.3, 3.4
+
+**Story 3.2: Account Balance API**
+- **Dependencies**: 3.0 (Database Schema), 3.1 (Account Details - for pattern reference)
+- **Blocks**: None
+- **Can Start**: After 3.0 (can reference 3.1 pattern)
+- **Parallel Development**: Can work in parallel with 3.1, 3.3, 3.4
+
+### Epic 3: Loans and Transactions Read Operations
+**Story 3.3: Loans API**
+- **Dependencies**: 3.0 (Database Schema)
+- **Blocks**: None
+- **Can Start**: After 3.0
+- **Parallel Development**: Can work in parallel with 3.1, 3.2, 3.4
+
+**Story 3.4: Transaction History API**
+- **Dependencies**: 3.0 (Database Schema)
+- **Blocks**: 3.6 (Payment Confirmation creates transactions)
+- **Can Start**: After 3.0
+- **Parallel Development**: Can work in parallel with 3.1, 3.2, 3.3
+
+### Epic 4: Payment and Transfer Operations
+**Story 3.5: Payment Initiation API**
+- **Dependencies**: 3.0 (Database Schema), 3.1 (Account Details - for account validation)
+- **Blocks**: 3.6 (Payment Confirmation)
+- **Can Start**: After 3.0 and 3.1
+- **Status**: Critical path for payment functionality
+
+**Story 3.6: Payment Confirmation API**
+- **Dependencies**: 3.0 (Database Schema), 3.5 (Payment Initiation)
+- **Blocks**: None
+- **Can Start**: After 3.5
+- **Status**: Completes payment flow
+
+### Epic 5: Alerts and Notifications Management
+**Story 3.7: Payment Alerts API**
+- **Dependencies**: 3.0 (Database Schema)
+- **Blocks**: None
+- **Can Start**: After 3.0
+- **Parallel Development**: Can work in parallel with all other stories
+
+**Story 3.8: Notification Preferences API**
+- **Dependencies**: 3.0 (Database Schema)
+- **Blocks**: None
+- **Can Start**: After 3.0
+- **Parallel Development**: Can work in parallel with all other stories
+
+### Supporting Stories
+**Story 3.9: Internal Banking APIs**
+- **Dependencies**: 3.1 (Account Details), 3.4 (Transaction History)
+- **Blocks**: None
+- **Can Start**: After 3.1 and 3.4
+- **Purpose**: Enables MCP server integration
+
+---
+
+## Mock Bank APIs Development Phases
+
+### Phase 1: Foundation (Week 1)
+**Sequential:**
+1. **3.0 Database Schema** ← **START HERE** (blocks all others)
+
+### Phase 2: Read Operations (Week 1-2)
+**Parallel Development:**
+1. **3.1 Account Details** (after 3.0) ← **Parallel**
+2. **3.2 Account Balance** (after 3.0) ← **Parallel**
+3. **3.3 Loans API** (after 3.0) ← **Parallel**
+4. **3.4 Transaction History** (after 3.0) ← **Parallel**
+
+### Phase 3: Payment Operations (Week 2)
+**Sequential:**
+1. **3.5 Payment Initiation** (after 3.0, 3.1)
+2. **3.6 Payment Confirmation** (after 3.5)
+
+### Phase 4: Alerts and Notifications (Week 2-3)
+**Parallel Development:**
+1. **3.7 Payment Alerts** (after 3.0) ← **Parallel**
+2. **3.8 Notification Preferences** (after 3.0) ← **Parallel**
+
+### Phase 5: Integration (Week 3)
+**Sequential:**
+1. **3.9 Internal Banking APIs** (after 3.1, 3.4)
+
+---

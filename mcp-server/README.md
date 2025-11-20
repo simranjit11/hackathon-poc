@@ -1,86 +1,46 @@
 # MCP Banking Tools Server
 
-JWT-authenticated banking tools server using FASTMCP with PostgreSQL backend.
+JWT-authenticated banking tools server using FASTMCP that integrates with the Next.js banking API backend.
 
 ## Features
 
 - **Balance Lookup**: Get account balances for all account types
 - **Transaction History**: Retrieve recent transactions with filtering
 - **Loan Information**: Get loan details and payment schedules
+- **Payment Processing**: Initiate and confirm payments (two-step process)
+- **Alert Management**: Set up and retrieve payment alerts
 - **JWT Authentication**: Secure token-based authentication with scope validation
 - **Data Masking**: Sensitive information masked before returning results
-- **Caching**: In-memory caching with configurable TTL
-- **PostgreSQL Backend**: Real database queries instead of mock data
+- **Caching**: Redis-based caching with configurable TTL
+- **HTTP API Integration**: Calls Next.js banking APIs instead of direct database access
+
+## Architecture
+
+The MCP server acts as a middleware layer that:
+1. Receives MCP tool calls with JWT tokens
+2. Validates and authenticates JWT tokens
+3. Makes HTTP requests to the Next.js banking API backend
+4. Applies data masking and caching
+5. Returns formatted responses to the MCP client
 
 ## Installation
 
 ```bash
-pip install -e .
-# or
+# Using uv (recommended)
 uv sync
+
+# Or using pip
+pip install -e .
 ```
-
-## Database Setup
-
-### Option 1: Using Docker (Recommended)
-
-If you have Docker installed, the easiest way is to use the setup script:
-
-```bash
-./setup-database.sh
-```
-
-Or manually:
-
-```bash
-# Start PostgreSQL container
-docker run --name postgres-banking \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=banking \
-  -p 5432:5432 \
-  -d postgres:15
-
-# Wait a few seconds for PostgreSQL to start, then run schema
-docker exec -i postgres-banking psql -U postgres -d banking < schema.sql
-```
-
-### Option 2: Install PostgreSQL Locally
-
-**macOS (using Homebrew):**
-```bash
-brew install postgresql@15
-brew services start postgresql@15
-
-# Create database
-psql postgres -c "CREATE DATABASE banking;"
-
-# Run schema
-psql banking < schema.sql
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get update
-sudo apt-get install postgresql postgresql-contrib
-
-# Create database
-sudo -u postgres psql -c "CREATE DATABASE banking;"
-
-# Run schema
-sudo -u postgres psql banking < schema.sql
-```
-
-### Option 3: Use Cloud PostgreSQL
-
-You can use any PostgreSQL service (AWS RDS, Google Cloud SQL, etc.) and set the `DATABASE_URL` environment variable.
 
 ## Configuration
 
 Set environment variables:
 
 ```bash
-# Database (required)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/banking
+# Backend API (Next.js server)
+BACKEND_API_URL=http://localhost:3000
+INTERNAL_API_KEY=your-internal-api-key  # For server-to-server calls
 
 # JWT
 MCP_JWT_SECRET_KEY=your-secret-key
@@ -91,6 +51,10 @@ MCP_HOST=0.0.0.0
 MCP_PORT=8001
 MCP_PATH=/mcp
 
+# Cache (Redis)
+CACHE_ENABLED=true
+REDIS_URL=redis://localhost:6379/0
+
 # Logging
 LOG_LEVEL=INFO
 ```
@@ -100,13 +64,11 @@ LOG_LEVEL=INFO
 The server uses HTTP transport by default:
 
 ```bash
+# Using uv
+uv run main.py
+
+# Or using Python directly
 python main.py
-```
-
-Or using FASTMCP CLI:
-
-```bash
-fastmcp run main.py
 ```
 
 The server will be available at `http://{HOST}:{PORT}{MCP_PATH}` (default: `http://0.0.0.0:8001/mcp`)
@@ -119,36 +81,26 @@ The server uses **streamable HTTP transport** by default. You can configure it v
 - `MCP_PORT`: Server port (default: `8001`)
 - `MCP_PATH`: MCP endpoint path (default: `/mcp`)
 
-## Database Schema
-
-The database includes three main tables:
-
-- **accounts**: User accounts (checking, savings, credit_card)
-- **transactions**: Transaction history linked to accounts
-- **loans**: Loan information for users
-
-See `schema.sql` for the complete schema definition and sample data.
-
 ## Tools
+
+All tools require a `jwt_token` parameter as the first argument.
 
 ### get_balance
 
 Get account balances for the authenticated user.
 
 **Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
 - `account_type` (str, optional): Account type filter (checking, savings, credit_card)
 
 **Returns:** List of balance responses
-
-**Authentication:** JWT token must be provided in HTTP headers:
-- `Authorization: Bearer <token>` (preferred)
-- `X-JWT-Token: <token>` (fallback)
 
 ### get_transactions
 
 Get transaction history for the authenticated user.
 
 **Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
 - `account_type` (str, optional): Account type filter
 - `start_date` (str, optional): Start date filter (YYYY-MM-DD)
 - `end_date` (str, optional): End date filter (YYYY-MM-DD)
@@ -156,24 +108,91 @@ Get transaction history for the authenticated user.
 
 **Returns:** List of transaction responses, sorted by date (most recent first)
 
-**Authentication:** JWT token must be provided in HTTP headers (see get_balance)
-
 ### get_loans
 
 Get loan information for the authenticated user.
 
-**Parameters:** None
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
 
 **Returns:** List of loan responses with details and payment schedules
 
-**Authentication:** JWT token must be provided in HTTP headers (see get_balance)
+### make_payment
+
+Make a payment or transfer between accounts (two-step process: initiate then confirm).
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'transact' scope
+- `from_account` (str, required): Source account type ('checking', 'savings')
+- `to_account` (str, required): Destination account or payee name
+- `amount` (float, required): Amount to transfer
+- `description` (str, optional): Optional description for the transaction
+
+**Returns:** Payment confirmation with details
+
+### get_credit_limit
+
+Get credit card limits and available credit.
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
+
+**Returns:** Credit card information with limits and utilization
+
+### set_alert
+
+Set up payment reminders or alerts.
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'configure' scope
+- `alert_type` (str, required): Type of alert ('payment', 'low_balance', 'large_transaction')
+- `description` (str, required): Description of the alert
+- `due_date` (str, optional): Optional due date for payment reminders (YYYY-MM-DD)
+
+**Returns:** Alert confirmation
+
+### get_alerts
+
+Get active payment alerts and reminders.
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
+
+**Returns:** List of active alerts
+
+### get_user_details
+
+Get user profile details including email, name, roles, and permissions.
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
+
+**Returns:** Dictionary with user details
+
+### get_transfer_contacts
+
+Get list of saved contacts/beneficiaries for transfers.
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
+
+**Returns:** List of beneficiary dictionaries with nickname and payment details
+
+### get_current_date_time
+
+Get the current date and time.
+
+**Parameters:**
+- `jwt_token` (str, required): JWT authentication token with 'read' scope
+
+**Returns:** Formatted current date and time string
 
 ## Authentication
 
-All tools require a JWT token with the 'read' scope in HTTP headers. The token must:
+All tools require a JWT token as the first parameter. The token must:
 - Be signed with the configured `MCP_JWT_SECRET_KEY`
 - Have issuer matching `MCP_JWT_ISSUER`
-- Include 'read' in the `scopes` claim
+- Include appropriate scope ('read', 'transact', or 'configure') in the `scopes` claim
 - Include `sub` claim with user identifier
 
 Generate tokens using:
@@ -183,58 +202,69 @@ uv run python generate_jwt.py
 
 ## Caching
 
+The server uses Redis for caching:
 - Balance results: 5 minutes TTL
 - Transaction results: 2 minutes TTL
 - Loan results: 10 minutes TTL
 
-## Database Connection Pool
+Configure Redis via `REDIS_URL` environment variable.
 
-The server uses asyncpg connection pooling for efficient database access:
-- Minimum pool size: 5 (configurable via `DATABASE_POOL_MIN_SIZE`)
-- Maximum pool size: 20 (configurable via `DATABASE_POOL_MAX_SIZE`)
+## Integration with Next.js Backend
+
+The MCP server integrates with the Next.js banking API backend:
+
+- **User-authenticated calls**: Uses JWT tokens passed from MCP tools
+- **Server-to-server calls**: Uses `INTERNAL_API_KEY` for internal endpoints
+- **API endpoints**: Calls `/api/banking/*` endpoints on the Next.js server
+
+See `INTEGRATION_NOTES.md` and `INTEGRATION_SUMMARY.md` for detailed integration information.
 
 ## Troubleshooting
 
-### Database Connection Issues
+### Backend API Connection Issues
 
 If you get connection errors, check:
 
-1. **PostgreSQL is running:**
+1. **Next.js server is running:**
    ```bash
-   # Docker
-   docker ps | grep postgres
-   
-   # Local
-   brew services list | grep postgresql
+   curl http://localhost:3000/api/health
    ```
 
-2. **Connection string is correct:**
+2. **Backend URL is correct:**
    ```bash
-   echo $DATABASE_URL
-   # Should be: postgresql://user:password@host:port/database
+   echo $BACKEND_API_URL
+   # Should be: http://localhost:3000
    ```
 
-3. **Database exists:**
+3. **Internal API key is configured:**
    ```bash
-   # Docker
-   docker exec -it postgres-banking psql -U postgres -l
-   
-   # Local
-   psql -l
+   echo $INTERNAL_API_KEY
+   # Should match the key configured in Next.js backend
    ```
 
-### Docker Container Management
+### JWT Token Issues
 
-```bash
-# Start container
-docker start postgres-banking
+1. **Token is valid:**
+   - Check that `MCP_JWT_SECRET_KEY` matches the key used to sign tokens
+   - Verify `MCP_JWT_ISSUER` matches the token issuer
 
-# Stop container
-docker stop postgres-banking
+2. **Token has required scopes:**
+   - 'read' scope for read operations
+   - 'transact' scope for payment operations
+   - 'configure' scope for alert configuration
 
-# View logs
-docker logs postgres-banking
+### Redis Connection Issues
 
-# Remove container (WARNING: deletes data)
-docker rm -f postgres-banking
-```
+If caching is not working:
+
+1. **Redis is running:**
+   ```bash
+   redis-cli ping
+   # Should return: PONG
+   ```
+
+2. **Redis URL is correct:**
+   ```bash
+   echo $REDIS_URL
+   # Should be: redis://localhost:6379/0
+   ```

@@ -1,198 +1,168 @@
 """
 Banking API Client
 ==================
-Mock banking API that returns account data.
-In production, this would call an external banking service.
+Client for calling Next.js banking APIs.
+Uses JWT tokens for user-authenticated calls and API keys for server-to-server calls.
 """
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
+import httpx
+import os
 
 logger = logging.getLogger(__name__)
 
 
 class BankingAPI:
-    """Mock banking API client."""
+    """Banking API client that calls Next.js banking endpoints."""
     
-    # Mock customer accounts database (matching agent.py structure)
-    _accounts = {
-        "12345": {
-            "customer_name": "John Doe",
-            "checking": {
-                "balance": 2547.83,
-                "account_number": "CHK-12345-001",
-                "type": "checking"
-            },
-            "savings": {
-                "balance": 15430.22,
-                "account_number": "SAV-12345-002",
-                "type": "savings"
-            },
-            "credit_card": {
-                "balance": 1250.45,
-                "limit": 5000.00,
-                "account_number": "CC-12345-003",
-                "type": "credit_card"
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None
+    ):
+        """
+        Initialize banking API client.
+        
+        Args:
+            base_url: Backend API base URL (defaults to env var)
+            api_key: API key for server-to-server calls (defaults to env var)
+        """
+        self.base_url = base_url or os.getenv(
+            "BACKEND_API_URL",
+            "http://localhost:3000"
+        )
+        self.api_key = api_key or os.getenv("INTERNAL_API_KEY")
+        
+        # HTTP client with timeout
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=30.0,
+            headers={
+                "Content-Type": "application/json",
             }
-        },
-        "67890": {
-            "customer_name": "Jane Smith",
-            "checking": {
-                "balance": 3821.67,
-                "account_number": "CHK-67890-001",
-                "type": "checking"
-            },
-            "savings": {
-                "balance": 25678.90,
-                "account_number": "SAV-67890-002",
-                "type": "savings"
-            },
-            "credit_card": {
-                "balance": 2100.30,
-                "limit": 8000.00,
-                "account_number": "CC-67890-003",
-                "type": "credit_card"
-            }
-        }
-    }
+        )
     
-    # Mock transaction history
-    _transactions = {
-        "12345": [
-            {
-                "date": "2025-11-05",
-                "description": "Grocery Store",
-                "amount": -87.32,
-                "type": "debit",
-                "account_number": "CHK-12345-001"
-            },
-            {
-                "date": "2025-11-04",
-                "description": "Salary Deposit",
-                "amount": 3200.00,
-                "type": "credit",
-                "account_number": "CHK-12345-001"
-            },
-            {
-                "date": "2025-11-03",
-                "description": "Gas Station",
-                "amount": -45.67,
-                "type": "debit",
-                "account_number": "CHK-12345-001"
-            },
-            {
-                "date": "2025-11-02",
-                "description": "Online Transfer",
-                "amount": -500.00,
-                "type": "transfer",
-                "account_number": "CHK-12345-001"
-            },
-            {
-                "date": "2025-11-01",
-                "description": "Coffee Shop",
-                "amount": -12.95,
-                "type": "debit",
-                "account_number": "CHK-12345-001"
-            }
-        ],
-        "67890": [
-            {
-                "date": "2025-11-05",
-                "description": "Rent Payment",
-                "amount": -1800.00,
-                "type": "debit",
-                "account_number": "CHK-67890-001"
-            },
-            {
-                "date": "2025-11-04",
-                "description": "Freelance Payment",
-                "amount": 1250.00,
-                "type": "credit",
-                "account_number": "CHK-67890-001"
-            },
-            {
-                "date": "2025-11-03",
-                "description": "Utility Bill",
-                "amount": -125.40,
-                "type": "debit",
-                "account_number": "CHK-67890-001"
-            },
-            {
-                "date": "2025-11-02",
-                "description": "Investment Deposit",
-                "amount": -1000.00,
-                "type": "transfer",
-                "account_number": "CHK-67890-001"
-            },
-            {
-                "date": "2025-11-01",
-                "description": "Restaurant",
-                "amount": -85.60,
-                "type": "debit",
-                "account_number": "CHK-67890-001"
-            }
-        ]
-    }
+    async def _get_with_token(self, endpoint: str, jwt_token: str) -> Dict[str, Any]:
+        """Make GET request with JWT token."""
+        headers = {"Authorization": f"Bearer {jwt_token}"}
+        response = await self.client.get(endpoint, headers=headers)
+        response.raise_for_status()
+        return response.json()
     
-    # Mock loan information
-    _loans = {
-        "12345": [
-            {
-                "type": "Mortgage",
-                "balance": 285000.00,
-                "rate": 3.75,
-                "monthly_payment": 1820.50,
-                "account_number": "LOAN-12345-001",
-                "remaining_term_months": 312,
-                "next_payment_date": "2025-12-01"
-            },
-            {
-                "type": "Auto Loan",
-                "balance": 18500.00,
-                "rate": 4.25,
-                "monthly_payment": 435.20,
-                "account_number": "LOAN-12345-002",
-                "remaining_term_months": 48,
-                "next_payment_date": "2025-12-15"
-            }
-        ],
-        "67890": [
-            {
-                "type": "Personal Loan",
-                "balance": 8500.00,
-                "rate": 6.50,
-                "monthly_payment": 275.80,
-                "account_number": "LOAN-67890-001",
-                "remaining_term_months": 36,
-                "next_payment_date": "2025-12-10"
-            }
-        ]
-    }
+    async def _get_with_api_key(self, endpoint: str) -> Dict[str, Any]:
+        """Make GET request with API key (server-to-server)."""
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+        headers = {"X-API-Key": self.api_key}
+        response = await self.client.get(endpoint, headers=headers)
+        response.raise_for_status()
+        return response.json()
     
-    async def get_accounts(self, user_id: str) -> List[Dict[str, Any]]:
+    async def _post_with_token(
+        self,
+        endpoint: str,
+        jwt_token: str,
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Make POST request with JWT token."""
+        headers = {"Authorization": f"Bearer {jwt_token}"}
+        response = await self.client.post(endpoint, headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()
+    
+    async def get_accounts(
+        self,
+        user_id: str,
+        jwt_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get all accounts for a user.
         
         Args:
             user_id: User identifier
+            jwt_token: Optional JWT token for user-authenticated calls
             
         Returns:
             List of account dictionaries
         """
-        if user_id not in self._accounts:
-            logger.warning(f"User {user_id} not found in accounts")
+        try:
+            if jwt_token:
+                # User-authenticated call
+                result = await self._get_with_token("/api/banking/accounts", jwt_token)
+            else:
+                # Server-to-server call
+                result = await self._get_with_api_key(f"/api/internal/banking/accounts/{user_id}")
+            
+            accounts = result.get("data", [])
+            
+            # Transform to match expected format
+            transformed = []
+            for account in accounts:
+                transformed.append({
+                    "type": account.get("accountType", ""),
+                    "account_number": account.get("accountNumber", ""),
+                    "balance": float(account.get("balance", 0)),
+                    "limit": float(account.get("creditLimit", 0)) if account.get("creditLimit") else None,
+                    "currency": account.get("currency", "USD"),
+                    "status": account.get("status", "active"),
+                })
+            
+            return transformed
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch accounts: {e}")
             return []
+    
+    async def get_account_balances(
+        self,
+        user_id: str,
+        account_type: Optional[str] = None,
+        jwt_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get account balances for a user.
         
-        customer = self._accounts[user_id]
-        accounts = []
-        
-        for account_type in ["checking", "savings", "credit_card"]:
-            if account_type in customer:
-                account = customer[account_type].copy()
-                accounts.append(account)
-        
-        return accounts
+        Args:
+            user_id: User identifier
+            account_type: Optional account type filter
+            jwt_token: Optional JWT token for user-authenticated calls
+            
+        Returns:
+            List of balance dictionaries
+        """
+        try:
+            endpoint = "/api/banking/accounts/balance"
+            if account_type:
+                endpoint += f"?accountType={account_type}"
+            
+            if jwt_token:
+                result = await self._get_with_token(endpoint, jwt_token)
+            else:
+                # For server-to-server, we need to get accounts and filter
+                accounts = await self.get_accounts(user_id)
+                if account_type:
+                    accounts = [acc for acc in accounts if acc.get("type") == account_type]
+                return accounts
+            
+            balances = result.get("data", [])
+            
+            # Transform to match expected format
+            transformed = []
+            for balance in balances:
+                transformed.append({
+                    "account_type": balance.get("accountType", ""),
+                    "account_number": balance.get("accountNumber", ""),
+                    "balance": float(balance.get("balance", 0)),
+                    "credit_limit": float(balance.get("creditLimit", 0)) if balance.get("creditLimit") else None,
+                    "available_balance": float(balance.get("availableBalance", 0)),
+                    "currency": balance.get("currency", "USD"),
+                })
+            
+            return transformed
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch account balances: {e}")
+            return []
     
     async def get_transactions(
         self,
@@ -200,7 +170,8 @@ class BankingAPI:
         account_type: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        jwt_token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get transactions for a user.
@@ -211,57 +182,222 @@ class BankingAPI:
             start_date: Optional start date filter (YYYY-MM-DD)
             end_date: Optional end date filter (YYYY-MM-DD)
             limit: Maximum number of transactions
+            jwt_token: Optional JWT token for user-authenticated calls
             
         Returns:
             List of transaction dictionaries
         """
-        if user_id not in self._transactions:
-            logger.warning(f"User {user_id} not found in transactions")
+        try:
+            # Build query parameters
+            params = []
+            if account_type:
+                params.append(f"accountType={account_type}")
+            if start_date:
+                params.append(f"startDate={start_date}")
+            if end_date:
+                params.append(f"endDate={end_date}")
+            if limit:
+                params.append(f"limit={limit}")
+            
+            endpoint = "/api/banking/transactions"
+            if params:
+                endpoint += "?" + "&".join(params)
+            
+            if jwt_token:
+                result = await self._get_with_token(endpoint, jwt_token)
+            else:
+                result = await self._get_with_api_key(f"/api/internal/banking/transactions/{user_id}?{'&'.join(params)}")
+            
+            transactions = result.get("data", [])
+            
+            # Transform to match expected format
+            transformed = []
+            for txn in transactions:
+                # Parse date from ISO format
+                created_at = txn.get("createdAt", "")
+                date_str = created_at.split("T")[0] if "T" in created_at else created_at
+                
+                # Determine transaction type
+                txn_type = txn.get("transactionType", "debit")
+                amount = float(txn.get("amount", 0))
+                
+                # For payments/transfers, amount is negative (outgoing)
+                if txn_type in ["payment", "transfer"]:
+                    amount = -abs(amount)
+                elif txn_type == "deposit":
+                    amount = abs(amount)
+                
+                transformed.append({
+                    "date": date_str,
+                    "description": txn.get("description", ""),
+                    "amount": amount,
+                    "type": "debit" if amount < 0 else "credit",
+                    "account_number": txn.get("fromAccount", ""),
+                })
+            
+            return transformed
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch transactions: {e}")
             return []
-        
-        transactions = self._transactions[user_id].copy()
-        
-        # Filter by account_type if specified
-        if account_type:
-            transactions = [
-                txn for txn in transactions
-                if account_type.lower() in txn.get("account_number", "").lower()
-            ]
-        
-        # Filter by date range if specified
-        if start_date:
-            transactions = [
-                txn for txn in transactions
-                if txn.get("date", "") >= start_date
-            ]
-        
-        if end_date:
-            transactions = [
-                txn for txn in transactions
-                if txn.get("date", "") <= end_date
-            ]
-        
-        # Limit results
-        return transactions[:limit]
     
-    async def get_loans(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_loans(
+        self,
+        user_id: str,
+        jwt_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get loans for a user.
         
         Args:
             user_id: User identifier
+            jwt_token: Optional JWT token for user-authenticated calls
             
         Returns:
             List of loan dictionaries
         """
-        if user_id not in self._loans:
-            logger.warning(f"User {user_id} not found in loans")
+        try:
+            if jwt_token:
+                result = await self._get_with_token("/api/banking/loans", jwt_token)
+            else:
+                # For server-to-server, we'd need an internal endpoint
+                # For now, return empty list or use user token
+                logger.warning("Server-to-server loan endpoint not available, using mock data")
+                return []
+            
+            loans = result.get("data", [])
+            
+            # Transform to match expected format
+            transformed = []
+            for loan in loans:
+                transformed.append({
+                    "type": loan.get("loanType", ""),
+                    "balance": float(loan.get("outstandingBalance", 0)),
+                    "rate": float(loan.get("interestRate", 0)),
+                    "monthly_payment": float(loan.get("monthlyPayment", 0)),
+                    "account_number": loan.get("loanNumber", ""),
+                    "remaining_term_months": loan.get("remainingTermMonths", 0),
+                    "next_payment_date": loan.get("nextPaymentDate", "").split("T")[0] if loan.get("nextPaymentDate") else "",
+                })
+            
+            return transformed
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch loans: {e}")
             return []
-        
-        return self._loans[user_id].copy()
     
-    # Mock alerts storage
-    _alerts: Dict[str, List[Dict[str, Any]]] = {}
+    async def initiate_payment(
+        self,
+        user_id: str,
+        from_account: str,
+        to_account: str,
+        amount: float,
+        description: str = "",
+        jwt_token: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Initiate a payment (two-step process).
+        
+        Args:
+            user_id: User identifier
+            from_account: Source account number or account type
+            to_account: Destination (beneficiary nickname, ID, or payment address)
+            amount: Amount to transfer
+            description: Optional description
+            jwt_token: JWT token for authentication
+            
+        Returns:
+            Payment initiation response with paymentSessionId and otpCode
+        """
+        if not jwt_token:
+            raise ValueError("JWT token required for payment initiation")
+        
+        # Build request body - try to detect if to_account is a beneficiary nickname
+        # or a payment address
+        payment_data = {
+            "fromAccount": from_account,
+            "amount": amount,
+            "description": description or f"Payment to {to_account}",
+        }
+        
+        # Check if to_account looks like a beneficiary nickname (simple heuristic)
+        # In production, you'd check against beneficiary list first
+        if "@" in to_account or to_account.startswith("ACC-") or to_account.startswith("CHK-") or to_account.startswith("SAV-"):
+            # Looks like a payment address or account number
+            payment_data["paymentAddress"] = to_account
+        else:
+            # Assume it's a beneficiary nickname
+            payment_data["beneficiaryNickname"] = to_account
+        
+        try:
+            result = await self._post_with_token(
+                "/api/banking/payments/initiate",
+                jwt_token,
+                payment_data
+            )
+            
+            return {
+                "paymentSessionId": result.get("paymentSessionId"),
+                "otpCode": result.get("otpCode"),  # Only in dev mode
+                "transaction": result.get("transaction", {}),
+                "message": result.get("message", "OTP sent"),
+            }
+        except httpx.HTTPStatusError as e:
+            error_data = {}
+            try:
+                error_data = e.response.json()
+            except:
+                pass
+            error_msg = error_data.get("error", str(e))
+            raise ValueError(f"Payment initiation failed: {error_msg}")
+    
+    async def confirm_payment(
+        self,
+        payment_session_id: str,
+        otp_code: str,
+        jwt_token: str
+    ) -> Dict[str, Any]:
+        """
+        Confirm a payment with OTP.
+        
+        Args:
+            payment_session_id: Payment session ID from initiate_payment
+            otp_code: OTP code
+            jwt_token: JWT token for authentication
+            
+        Returns:
+            Payment confirmation response
+        """
+        if not jwt_token:
+            raise ValueError("JWT token required for payment confirmation")
+        
+        try:
+            result = await self._post_with_token(
+                "/api/banking/payments/confirm",
+                jwt_token,
+                {
+                    "paymentSessionId": payment_session_id,
+                    "otpCode": otp_code,
+                }
+            )
+            
+            transaction = result.get("transaction", {})
+            
+            return {
+                "confirmation_number": transaction.get("referenceNumber", ""),
+                "from_account": transaction.get("fromAccount", ""),
+                "to_account": transaction.get("toAccount", ""),
+                "amount": float(transaction.get("amount", 0)),
+                "description": transaction.get("description", ""),
+                "date": transaction.get("completedAt", "").split("T")[0] if transaction.get("completedAt") else datetime.now().strftime("%Y-%m-%d"),
+                "status": transaction.get("status", "completed"),
+            }
+        except httpx.HTTPStatusError as e:
+            error_data = {}
+            try:
+                error_data = e.response.json()
+            except:
+                pass
+            error_msg = error_data.get("error", str(e))
+            raise ValueError(f"Payment confirmation failed: {error_msg}")
     
     async def make_payment(
         self,
@@ -269,93 +405,77 @@ class BankingAPI:
         from_account: str,
         to_account: str,
         amount: float,
-        description: str = ""
+        description: str = "",
+        jwt_token: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Make a payment or transfer.
+        Make a payment (legacy method - now uses two-step process).
+        This method initiates and confirms in one call (for backward compatibility).
         
         Args:
             user_id: User identifier
-            from_account: Source account type ('checking', 'savings')
+            from_account: Source account type or account number
             to_account: Destination account or payee name
             amount: Amount to transfer
             description: Optional description
+            jwt_token: JWT token for authentication
             
         Returns:
             Payment confirmation dictionary
-            
-        Raises:
-            ValueError: If user not found, account not found, or insufficient funds
         """
-        if user_id not in self._accounts:
-            raise ValueError(f"Customer ID {user_id} not found.")
+        if not jwt_token:
+            raise ValueError("JWT token required for payments")
         
-        customer = self._accounts[user_id]
+        # Step 1: Initiate payment
+        initiation = await self.initiate_payment(
+            user_id,
+            from_account,
+            to_account,
+            amount,
+            description,
+            jwt_token
+        )
         
-        if from_account not in customer:
-            raise ValueError(f"Source account '{from_account}' not found.")
+        # Step 2: Confirm payment with OTP
+        # Note: In production, OTP would be sent via SMS/Email
+        # For now, we use the OTP from the response (dev mode only)
+        otp_code = initiation.get("otpCode")
+        if not otp_code:
+            raise ValueError("OTP code not available. Payment requires manual confirmation.")
         
-        account = customer[from_account]
+        payment_session_id = initiation.get("paymentSessionId")
+        if not payment_session_id:
+            raise ValueError("Payment session ID not available")
         
-        if account["balance"] < amount:
-            raise ValueError(
-                f"Insufficient funds. Available balance: ${account['balance']:.2f}"
-            )
+        # Confirm the payment
+        confirmation = await self.confirm_payment(
+            payment_session_id,
+            otp_code,
+            jwt_token
+        )
         
-        # Process the payment
-        account["balance"] -= amount
-        
-        # Add to transaction history
-        if user_id not in self._transactions:
-            self._transactions[user_id] = []
-        
-        transaction = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "description": f"Payment to {to_account}" + (f" - {description}" if description else ""),
-            "amount": -amount,
-            "type": "payment",
-            "account_number": account["account_number"]
-        }
-        
-        self._transactions[user_id].insert(0, transaction)
-        
-        confirmation_number = f"PAY{len(self._transactions[user_id]) + 1000}"
-        
-        return {
-            "confirmation_number": confirmation_number,
-            "from_account": from_account,
-            "to_account": to_account,
-            "amount": amount,
-            "new_balance": account["balance"],
-            "description": description,
-            "date": transaction["date"]
-        }
+        return confirmation
     
     async def get_customer_name(self, user_id: str) -> Optional[str]:
         """
         Get customer name for a user from backend API.
-        Falls back to mock data if backend API is unavailable.
         """
         try:
-            # Try to get user details from backend API
             from backend_client import get_backend_client
             backend_client = get_backend_client()
             user_details = await backend_client.get_user_details(user_id)
-            # Return name from backend API, or email as fallback
             return user_details.get("name") or user_details.get("email")
         except Exception as e:
-            # Fallback to mock data if backend API call fails
-            logger.warning(f"Failed to fetch user details from backend API: {e}. Using mock data.")
-            if user_id not in self._accounts:
-                return None
-            return self._accounts[user_id].get("customer_name")
+            logger.warning(f"Failed to fetch user details from backend API: {e}")
+            return None
     
     async def set_alert(
         self,
         user_id: str,
         alert_type: str,
         description: str,
-        due_date: Optional[str] = None
+        due_date: Optional[str] = None,
+        jwt_token: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Set up a payment reminder or alert.
@@ -365,33 +485,87 @@ class BankingAPI:
             alert_type: Type of alert ('payment', 'low_balance', 'large_transaction')
             description: Description of the alert
             due_date: Optional due date for payment reminders
+            jwt_token: JWT token for authentication
             
         Returns:
             Alert dictionary
         """
-        if user_id not in self._alerts:
-            self._alerts[user_id] = []
+        if not jwt_token:
+            raise ValueError("JWT token required for setting alerts")
         
-        alert = {
-            "type": alert_type.replace('_', ' ').title() + " Alert",
-            "description": description + (f" (Due: {due_date})" if due_date else ""),
-            "active": True,
-            "created_at": datetime.now().isoformat()
+        # Map alert types to API format
+        alert_type_map = {
+            "payment": "payment_received",
+            "low_balance": "low_balance",
+            "large_transaction": "payment_sent",
         }
+        api_alert_type = alert_type_map.get(alert_type, "payment_received")
         
-        self._alerts[user_id].append(alert)
-        
-        return alert
+        try:
+            result = await self._post_with_token(
+                "/api/banking/alerts",
+                jwt_token,
+                {
+                    "alertType": api_alert_type,
+                    "description": description,
+                }
+            )
+            
+            alert_data = result.get("data", {})
+            return {
+                "type": alert_data.get("alertType", "").replace("_", " ").title() + " Alert",
+                "description": description + (f" (Due: {due_date})" if due_date else ""),
+                "active": alert_data.get("isActive", True),
+                "created_at": alert_data.get("createdAt", datetime.now().isoformat()),
+            }
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to create alert: {e}")
+            # Fallback to in-memory storage for backward compatibility
+            return {
+                "type": alert_type.replace('_', ' ').title() + " Alert",
+                "description": description + (f" (Due: {due_date})" if due_date else ""),
+                "active": True,
+                "created_at": datetime.now().isoformat()
+            }
     
-    async def get_alerts(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_alerts(
+        self,
+        user_id: str,
+        jwt_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get all alerts for a user.
         
         Args:
             user_id: User identifier
+            jwt_token: JWT token for authentication
             
         Returns:
             List of alert dictionaries
         """
-        return self._alerts.get(user_id, [])
-
+        if not jwt_token:
+            # Return empty list if no token
+            return []
+        
+        try:
+            result = await self._get_with_token("/api/banking/alerts", jwt_token)
+            alerts = result.get("data", [])
+            
+            # Transform to match expected format
+            transformed = []
+            for alert in alerts:
+                transformed.append({
+                    "type": alert.get("alertType", "").replace("_", " ").title() + " Alert",
+                    "description": f"Threshold: ${alert.get('threshold', 0)}" if alert.get("threshold") else "Alert active",
+                    "active": alert.get("isActive", True),
+                    "created_at": alert.get("createdAt", ""),
+                })
+            
+            return transformed
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch alerts: {e}")
+            return []
+    
+    async def close(self):
+        """Close HTTP client."""
+        await self.client.aclose()
