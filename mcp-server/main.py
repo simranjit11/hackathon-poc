@@ -647,7 +647,7 @@ async def get_transfer_contacts(jwt_token: str) -> List[dict]:
     
     Args:
         jwt_token: JWT authentication token with 'read' scope
-        
+    
     Returns:
         List of beneficiary dictionaries with nickname and payment details
     """

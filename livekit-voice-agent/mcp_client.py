@@ -348,6 +348,19 @@ class MCPClient:
             ["read"]
         )
     
+    async def get_transfer_contacts(
+        self,
+        user_id: str,
+        session_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get list of saved contacts/beneficiaries for transfers."""
+        return await self._call_mcp_tool(
+            "get_transfer_contacts",
+            user_id,
+            session_id,
+            ["read"]
+        )
+    
     async def close(self):
         """Close HTTP client."""
         await self.client.aclose()

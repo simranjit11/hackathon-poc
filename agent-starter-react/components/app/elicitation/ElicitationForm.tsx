@@ -178,7 +178,7 @@ export function ElicitationForm({
           >
             <option value="">Select...</option>
             {field.options?.map(option => (
-              <key={option} value={option}>
+              <option key={option} value={option}>
                 {option}
               </option>
             ))}
