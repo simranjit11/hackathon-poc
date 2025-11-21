@@ -358,24 +358,28 @@ async def get_loans(jwt_token: str) -> List[dict]:
 @mcp.tool()
 async def initiate_payment(
     jwt_token: str,
-    from_account: str,
     to_account: str,
     amount: float,
+    from_account: Optional[str] = None,
     description: str = "",
     tool_call_id: str = "",
     platform: str = "web"
 ) -> dict:
     """
-    Initiate a payment or transfer between accounts with elicitation.
+    Initiate a payment or transfer with elicitation (OTP/confirmation required).
     
     This tool initiates a payment and returns an elicitation request for OTP/confirmation.
     The payment will be completed after the user provides the required confirmation.
     
+    If from_account is not specified, automatically uses the primary account with sufficient balance.
+    Priority: checking > savings > credit_card
+    
     Args:
         jwt_token: JWT authentication token with 'transact' scope
-        from_account: Source account type ('checking', 'savings')
         to_account: Destination account or payee name (beneficiary nickname or account number)
         amount: Amount to transfer
+        from_account: Optional source account type ('checking', 'savings', 'credit_card'). 
+                     If not provided, automatically selects account with sufficient balance.
         description: Optional description for the transaction
         tool_call_id: Tool call ID for tracking (optional)
         platform: Platform type (web/mobile) for elicitation requirements
@@ -388,6 +392,41 @@ async def initiate_payment(
     try:
         # Authenticate user with transact scope
         user = get_user_from_token(jwt_token, required_scope="transact")
+        
+        # Auto-select source account if not provided
+        if not from_account:
+            banking_api = BankingAPI()
+            accounts = await banking_api.get_account_balances(
+                user.user_id,
+                jwt_token=jwt_token
+            )
+            
+            # Priority: checking > savings > credit_card
+            # Select first account with sufficient balance
+            account_priority = ["checking", "savings", "credit_card"]
+            selected_account = None
+            
+            for acc_type in account_priority:
+                for account in accounts:
+                    if account.get("account_type") == acc_type:
+                        available = account.get("available_balance", account.get("balance", 0))
+                        if available >= amount:
+                            selected_account = acc_type
+                            logger.info(
+                                f"Auto-selected {acc_type} account with balance: {available}"
+                            )
+                            break
+                if selected_account:
+                    break
+            
+            if not selected_account:
+                raise ValueError(
+                    f"No account found with sufficient balance for amount: {amount}. "
+                    f"Please specify from_account parameter."
+                )
+            
+            from_account = selected_account
+        
         logger.info(
             f"Payment initiation for user_id: {user.user_id}, "
             f"from: {from_account}, to: {to_account}, amount: {amount}"

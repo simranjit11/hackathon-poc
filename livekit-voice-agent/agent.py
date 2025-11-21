@@ -130,7 +130,7 @@ When a user asks about:
 - Alerts → Use the get_alerts tool
 - Interest rates → Use the get_interest_rates tool
 - User profile/details → Use the get_user_details tool
-- Making payments → Use the make_payment tool
+- Making payments/transfers → Use the initiate_payment tool (this will trigger OTP/confirmation elicitation)
 - Setting alerts → Use the set_alert tool
 
 Always call the appropriate tool first, then use the tool's response to answer the user's question. Never provide information without calling the tools first.

@@ -48,7 +48,11 @@ class AuthenticatedMCPTools:
             "get_current_date_time": ["read"],
             "get_user_details": ["read"],  # Get user profile information
             "get_transfer_contacts": ["read"],  # Get beneficiaries/contacts
+<<<<<<< HEAD
             "make_payment_with_elicitation": ["transact"],
+=======
+            "initiate_payment": ["transact"],  # Initiate payment with elicitation
+>>>>>>> e24d70a (Add elicitation to initiate payment)
             "set_alert": ["configure"],
         }
     
@@ -142,12 +146,12 @@ class AuthenticatedMCPTools:
             {
                 "name": "get_transfer_contacts",
                 "description": "Get list of saved contacts/beneficiaries for transfers. Useful for resolving names like 'Pay Bob' to actual payment details. Returns list of beneficiary dictionaries with nickname and payment information.",
-                "func": self._create_tool_func_no_params("get_transfer_contacts"),
+                "func": self._create_tool_func("get_transfer_contacts"),
             },
             {
-                "name": "make_payment_with_elicitation",
-                "description": "Make a payment or transfer funds with user confirmation (OTP/approval). Use this for all payments. Requires from_account (source account), to_account (recipient account number), amount (payment amount), and optional description. Returns elicitation request for user confirmation.",
-                "func": self._create_tool_func_with_params("make_payment_with_elicitation"),
+                "name": "initiate_payment",
+                "description": "Initiate a payment or transfer funds. Triggers elicitation flow requiring user confirmation via OTP. Use this for ALL payment requests. REQUIRED: to_account (recipient name/nickname or account number), amount (number). OPTIONAL: from_account (if user specifies 'from savings' or 'from checking', otherwise auto-selects account with sufficient balance), description. Example: 'Transfer $100 to John' - auto-selects source account. 'Transfer $100 from savings to John' - uses savings. Returns elicitation request.",
+                "func": self._create_tool_func("initiate_payment"),
             },
             {
                 "name": "set_alert",
