@@ -1,0 +1,143 @@
+{
+  "info": {
+    "name": "Cashfree Payment APIs (FIXED)",
+    "description": "Fixed version with proper Accept header",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://0.0.0.0:8001/mcp"
+    },
+    {
+      "key": "jwt_token",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvcmNoZXN0cmF0b3IiLCJzdWIiOiJ0ZXN0X3VzZXIiLCJzY29wZXMiOlsicmVhZCIsInRyYW5zYWN0Il0sImlhdCI6MTc2MzcyNDIxNCwiZXhwIjoxNzYzNzM4NjE0LCJqdGkiOiJ0ZXN0LTE3NjM3MjQyMTQifQ.gvcNYeNhumI9Q1q_kW9w3lTeJg_unNhURS3pNzBXB4c"
+    },
+    {
+      "key": "order_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Create Order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"create_cashfree_order\",\n    \"arguments\": {\n      \"amount\": 500.0,\n      \"customer_name\": \"Test User\",\n      \"customer_email\": \"test@example.com\",\n      \"customer_phone\": \"9999999999\",\n      \"order_note\": \"Test payment from Postman\",\n      \"return_url\": \"https://example.com/return\",\n      \"jwt_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvcmNoZXN0cmF0b3IiLCJzdWIiOiJ0ZXN0X3VzZXIiLCJzY29wZXMiOlsicmVhZCIsInRyYW5zYWN0Il0sImlhdCI6MTc2MzcyNDIxNCwiZXhwIjoxNzYzNzM4NjE0LCJqdGkiOiJ0ZXN0LTE3NjM3MjQyMTQifQ.gvcNYeNhumI9Q1q_kW9w3lTeJg_unNhURS3pNzBXB4c\"\n    }\n  },\n  \"id\": 1\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        }
+      }
+    },
+    {
+      "name": "2. Initiate Payment (Generate OTP)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"initiate_cashfree_payment\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"payment_method\": \"UPI\",\n      \"phone_number\": \"9999999999\",\n      \"jwt_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvcmNoZXN0cmF0b3IiLCJzdWIiOiJ0ZXN0X3VzZXIiLCJzY29wZXMiOlsicmVhZCIsInRyYW5zYWN0Il0sImlhdCI6MTc2MzcyNDIxNCwiZXhwIjoxNzYzNzM4NjE0LCJqdGkiOiJ0ZXN0LTE3NjM3MjQyMTQifQ.gvcNYeNhumI9Q1q_kW9w3lTeJg_unNhURS3pNzBXB4c\"\n    }\n  },\n  \"id\": 2\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        }
+      }
+    },
+    {
+      "name": "3. Confirm Payment (Correct OTP)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"confirm_cashfree_payment\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"otp\": \"123456\",\n      \"jwt_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvcmNoZXN0cmF0b3IiLCJzdWIiOiJ0ZXN0X3VzZXIiLCJzY29wZXMiOlsicmVhZCIsInRyYW5zYWN0Il0sImlhdCI6MTc2MzcyNDIxNCwiZXhwIjoxNzYzNzM4NjE0LCJqdGkiOiJ0ZXN0LTE3NjM3MjQyMTQifQ.gvcNYeNhumI9Q1q_kW9w3lTeJg_unNhURS3pNzBXB4c\"\n    }\n  },\n  \"id\": 3\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        }
+      }
+    },
+    {
+      "name": "4. Get Order Status",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_cashfree_order_status\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"jwt_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvcmNoZXN0cmF0b3IiLCJzdWIiOiJ0ZXN0X3VzZXIiLCJzY29wZXMiOlsicmVhZCIsInRyYW5zYWN0Il0sImlhdCI6MTc2MzcyNDIxNCwiZXhwIjoxNzYzNzM4NjE0LCJqdGkiOiJ0ZXN0LTE3NjM3MjQyMTQifQ.gvcNYeNhumI9Q1q_kW9w3lTeJg_unNhURS3pNzBXB4c\"\n    }\n  },\n  \"id\": 4\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        }
+      }
+    },
+    {
+      "name": "5. Wrong OTP Test",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"confirm_cashfree_payment\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"otp\": \"999999\",\n      \"jwt_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvcmNoZXN0cmF0b3IiLCJzdWIiOiJ0ZXN0X3VzZXIiLCJzY29wZXMiOlsicmVhZCIsInRyYW5zYWN0Il0sImlhdCI6MTc2MzcyNDIxNCwiZXhwIjoxNzYzNzM4NjE0LCJqdGkiOiJ0ZXN0LTE3NjM3MjQyMTQifQ.gvcNYeNhumI9Q1q_kW9w3lTeJg_unNhURS3pNzBXB4c\"\n    }\n  },\n  \"id\": 5\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        }
+      }
+    }
+  ]
+}

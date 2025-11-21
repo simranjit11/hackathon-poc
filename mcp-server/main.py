@@ -748,6 +748,10 @@ async def create_cashfree_order(
     logger.info("Cashfree order creation request received")
     
     try:
+        # Log the first 50 chars of the token for debugging
+        logger.info(f"Received JWT token (first 50 chars): {jwt_token[:50] if jwt_token else 'None'}...")
+        logger.info(f"Received JWT token (last 20 chars): ...{jwt_token[-20:] if jwt_token and len(jwt_token) > 20 else 'None'}")
+        
         # Authenticate user with 'transact' scope
         user = get_user_from_token(jwt_token, required_scope="transact")
         
@@ -848,76 +852,156 @@ async def get_cashfree_order_status(
 
 
 @mcp.tool()
-async def create_cashfree_refund(
+async def initiate_cashfree_payment(
     order_id: str,
-    refund_amount: float,
-    refund_note: Optional[str] = None,
+    payment_method: str,
+    phone_number: str,
     jwt_token: str = ""
 ) -> str:
     """
-    Create a refund for a Cashfree payment order.
+    STEP 1: Initiate payment and send OTP to customer.
+    
+    Generates a hardcoded OTP (123456) and stores it for verification.
+    Customer will receive this OTP to complete payment.
     
     Args:
-        order_id: The Cashfree order ID to refund
-        refund_amount: Amount to refund (must be <= order amount)
-        refund_note: Optional note describing the refund reason
+        order_id: The Cashfree order ID (from create_cashfree_order)
+        payment_method: Payment method - "UPI", "CARD", or "NETBANKING"
+        phone_number: Customer's phone number (10 digits) where OTP will be sent
         jwt_token: JWT token for authentication (requires 'transact' scope)
         
     Returns:
-        JSON string with refund details
+        JSON string with OTP sent confirmation (includes test_otp for testing)
         
     Raises:
-        ValueError: If authentication fails or refund creation fails
+        ValueError: If authentication fails or payment initiation fails
+        
+    Example:
+        initiate_cashfree_payment(
+            order_id="order_123",
+            payment_method="UPI",
+            phone_number="9999999999"
+        )
     """
     import json
-    from datetime import datetime
     
-    logger.info(f"Cashfree refund request for order_id: {order_id}, amount: ₹{refund_amount}")
+    logger.info(f"Payment initiation request for order_id: {order_id}")
     
     try:
         # Authenticate user with 'transact' scope
         user = get_user_from_token(jwt_token, required_scope="transact")
         
         logger.info(
-            f"Creating Cashfree refund for user_id: {user.user_id}, "
-            f"order_id: {order_id}, amount: ₹{refund_amount}"
+            f"Initiating payment for user_id: {user.user_id}, "
+            f"order_id: {order_id}, phone: {phone_number}"
         )
         
-        # Validate refund amount
-        if refund_amount <= 0:
-            raise ValueError("Refund amount must be greater than 0")
+        # Validate phone number
+        if not phone_number or len(phone_number) != 10 or not phone_number.isdigit():
+            raise ValueError("Phone number must be exactly 10 digits")
         
         # Initialize Cashfree service
         cashfree_service = CashfreePaymentService()
         
-        # Generate unique refund ID
-        refund_id = f"refund_{user.user_id}_{int(datetime.now().timestamp())}"
-        
-        # Create refund
-        result = await cashfree_service.create_refund(
+        # Initiate payment (generates OTP)
+        result = await cashfree_service.initiate_payment(
             order_id=order_id,
-            refund_amount=refund_amount,
-            refund_id=refund_id,
-            refund_note=refund_note or "Refund requested by user"
+            payment_method=payment_method,
+            phone_number=phone_number
         )
         
         if result.get("success"):
             logger.info(
-                f"Refund created successfully for user_id: {user.user_id}, "
-                f"refund_id: {result.get('refund_id')}"
+                f"Payment initiated for user_id: {user.user_id}, "
+                f"OTP sent to: {phone_number}"
             )
             return json.dumps(result, indent=2)
         else:
             error_msg = result.get("error", "Unknown error")
-            logger.error(f"Refund creation failed: {error_msg}")
-            raise ValueError(f"Refund creation failed: {error_msg}")
+            logger.error(f"Payment initiation failed: {error_msg}")
+            raise ValueError(f"Payment initiation failed: {error_msg}")
         
     except ValueError as e:
-        logger.warning(f"Refund error: {e}")
-        raise ValueError(f"Refund creation failed: {str(e)}")
+        logger.warning(f"Payment initiation error: {e}")
+        raise ValueError(str(e))
     except Exception as e:
-        logger.error(f"Error creating refund: {e}")
-        raise ValueError(f"Failed to create refund: {str(e)}")
+        logger.error(f"Error initiating payment: {e}")
+        raise ValueError(f"Failed to initiate payment: {str(e)}")
+
+
+@mcp.tool()
+async def confirm_cashfree_payment(
+    order_id: str,
+    otp: str,
+    jwt_token: str = ""
+) -> str:
+    """
+    STEP 2: Confirm payment by verifying OTP.
+    
+    Verifies the OTP entered by customer and completes the payment.
+    Use OTP "123456" for testing.
+    
+    Args:
+        order_id: The Cashfree order ID
+        otp: The OTP code received by customer (6 digits, use "123456" for testing)
+        jwt_token: JWT token for authentication (requires 'transact' scope)
+        
+    Returns:
+        JSON string with payment confirmation and status
+        
+    Raises:
+        ValueError: If authentication fails, OTP is invalid, or payment fails
+        
+    Example:
+        confirm_cashfree_payment(
+            order_id="order_123",
+            otp="123456"
+        )
+    """
+    import json
+    
+    logger.info(f"Payment confirmation request for order_id: {order_id}")
+    
+    try:
+        # Authenticate user with 'transact' scope
+        user = get_user_from_token(jwt_token, required_scope="transact")
+        
+        logger.info(
+            f"Confirming payment for user_id: {user.user_id}, "
+            f"order_id: {order_id}"
+        )
+        
+        # Validate OTP
+        if not otp or len(otp) != 6 or not otp.isdigit():
+            raise ValueError("OTP must be exactly 6 digits")
+        
+        # Initialize Cashfree service
+        cashfree_service = CashfreePaymentService()
+        
+        # Confirm payment with OTP
+        result = await cashfree_service.confirm_payment(
+            order_id=order_id,
+            otp=otp
+        )
+        
+        if result.get("success"):
+            payment_status = result.get("payment_status")
+            logger.info(
+                f"Payment confirmed for user_id: {user.user_id}, "
+                f"status: {payment_status}"
+            )
+            return json.dumps(result, indent=2)
+        else:
+            error_msg = result.get("error", "Invalid OTP or payment failed")
+            logger.error(f"Payment confirmation failed: {error_msg}")
+            raise ValueError(f"Payment confirmation failed: {error_msg}")
+        
+    except ValueError as e:
+        logger.warning(f"Payment confirmation error: {e}")
+        raise ValueError(str(e))
+    except Exception as e:
+        logger.error(f"Error confirming payment: {e}")
+        raise ValueError(f"Failed to confirm payment: {str(e)}")
 
 
 if __name__ == "__main__":

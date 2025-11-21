@@ -1,0 +1,249 @@
+{
+  "info": {
+    "name": "Cashfree Payment APIs - Fixed",
+    "description": "Test collection for Cashfree payment integration with custom OTP flow (Fixed headers)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://0.0.0.0:8001/mcp",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Create Order",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Parse response",
+              "var jsonData = pm.response.json();",
+              "",
+              "// Extract order_id from the text response",
+              "if (jsonData.result && jsonData.result.content && jsonData.result.content[0]) {",
+              "    var textContent = jsonData.result.content[0].text;",
+              "    var orderData = JSON.parse(textContent);",
+              "    ",
+              "    // Save order_id to collection variable",
+              "    if (orderData.order_id) {",
+              "        pm.collectionVariables.set('order_id', orderData.order_id);",
+              "        console.log('Order ID saved: ' + orderData.order_id);",
+              "    }",
+              "}",
+              "",
+              "// Test assertions",
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Order created successfully', function () {",
+              "    pm.expect(textContent).to.include('success');",
+              "    pm.expect(textContent).to.include('order_id');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"create_cashfree_order\",\n    \"arguments\": {\n      \"amount\": 500.0,\n      \"customer_name\": \"Test User\",\n      \"customer_email\": \"test@example.com\",\n      \"customer_phone\": \"9999999999\",\n      \"order_note\": \"Test payment from Postman\",\n      \"return_url\": \"https://example.com/return\",\n      \"jwt_token\": \"{{jwt_token}}\"\n    }\n  },\n  \"id\": 1\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        },
+        "description": "Create a new payment order with Cashfree. Returns order_id needed for next steps."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Initiate Payment (Generate OTP)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('OTP sent successfully', function () {",
+              "    var jsonData = pm.response.json();",
+              "    var textContent = jsonData.result.content[0].text;",
+              "    pm.expect(textContent).to.include('otp_sent');",
+              "    pm.expect(textContent).to.include('123456');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"initiate_cashfree_payment\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"payment_method\": \"UPI\",\n      \"phone_number\": \"9999999999\",\n      \"jwt_token\": \"{{jwt_token}}\"\n    }\n  },\n  \"id\": 2\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        },
+        "description": "Generate OTP for payment. Returns test OTP: 123456"
+      },
+      "response": []
+    },
+    {
+      "name": "3. Confirm Payment (Correct OTP)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Payment confirmed successfully', function () {",
+              "    var jsonData = pm.response.json();",
+              "    var textContent = jsonData.result.content[0].text;",
+              "    pm.expect(textContent).to.include('SUCCESS');",
+              "    pm.expect(textContent).to.include('payment_status');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"confirm_cashfree_payment\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"otp\": \"123456\",\n      \"jwt_token\": \"{{jwt_token}}\"\n    }\n  },\n  \"id\": 3\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        },
+        "description": "Confirm payment with correct OTP (123456). Should return SUCCESS."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Get Order Status",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Order status retrieved', function () {",
+              "    var jsonData = pm.response.json();",
+              "    var textContent = jsonData.result.content[0].text;",
+              "    pm.expect(textContent).to.include('order_status');",
+              "    pm.expect(textContent).to.include('order_amount');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_cashfree_order_status\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"jwt_token\": \"{{jwt_token}}\"\n    }\n  },\n  \"id\": 4\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        },
+        "description": "Get current status of an order."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Confirm Payment (Wrong OTP - Error Test)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Wrong OTP rejected', function () {",
+              "    var jsonData = pm.response.json();",
+              "    var textContent = jsonData.result.content[0].text;",
+              "    pm.expect(textContent).to.include('Invalid or expired OTP');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"confirm_cashfree_payment\",\n    \"arguments\": {\n      \"order_id\": \"{{order_id}}\",\n      \"otp\": \"999999\",\n      \"jwt_token\": \"{{jwt_token}}\"\n    }\n  },\n  \"id\": 5\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}",
+          "host": ["{{base_url}}"]
+        },
+        "description": "Test error handling: Try to confirm with wrong OTP. Should return error."
+      },
+      "response": []
+    }
+  ]
+}

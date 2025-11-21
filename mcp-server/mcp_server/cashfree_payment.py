@@ -12,6 +12,7 @@ import httpx
 import uuid
 
 from mcp_server.config import settings
+from mcp_server.otp_store import otp_store
 
 logger = logging.getLogger(__name__)
 
@@ -327,67 +328,125 @@ class CashfreePaymentService:
                 "error_type": type(e).__name__,
             }
     
-    async def refund_payment(
+    async def initiate_payment(
         self,
         order_id: str,
-        refund_amount: float,
-        refund_note: Optional[str] = None,
+        payment_method: str,
+        phone_number: str,
+        upi_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Process a refund for a paid order.
+        Initiate payment - Step 1: Generate OTP for payment verification.
+        
+        This generates a hardcoded OTP (123456) for testing.
+        In production, this would integrate with SMS gateway to send real OTP.
         
         Args:
             order_id: Cashfree order ID
-            refund_amount: Amount to refund
-            refund_note: Optional refund note
+            payment_method: Payment method (UPI, CARD, NETBANKING)
+            phone_number: Customer phone number (10 digits)
+            upi_id: Optional UPI ID
             
         Returns:
-            Dict containing refund details
+            Dict with OTP sent confirmation
         """
         try:
-            # Generate unique refund ID
-            refund_id = f"refund_{order_id}_{int(datetime.now().timestamp())}"
+            logger.info(f"Initiating payment with OTP for order: {order_id}")
             
-            refund_data = {
-                "refund_id": refund_id,
-                "refund_amount": refund_amount,
+            # Verify order exists
+            order_status = await self.get_order_status(order_id)
+            if not order_status.get("success"):
+                return {
+                    "success": False,
+                    "error": "Order not found or invalid"
+                }
+            
+            # Generate OTP (hardcoded for testing)
+            otp = otp_store.generate_otp(order_id, phone_number, use_test_otp=True)
+            
+            logger.info(f"OTP generated for order: {order_id}, phone: {phone_number}")
+            
+            # In production, send SMS here:
+            # await sms_service.send_otp(phone_number, otp)
+            
+            return {
+                "success": True,
+                "order_id": order_id,
+                "phone_number": phone_number,
+                "otp_sent": True,
+                "message": f"OTP has been sent to {phone_number}. Please enter the OTP to complete payment.",
+                "test_otp": otp,  # Only for testing! Remove in production
+                "otp_expires_in_minutes": otp_store.OTP_EXPIRY_MINUTES,
+                "initiated_at": datetime.now().isoformat(),
             }
-            
-            if refund_note:
-                refund_data["refund_note"] = refund_note
-            
-            logger.info(f"Processing refund for order: {order_id}, amount: {refund_amount}")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/orders/{order_id}/refunds",
-                    json=refund_data,
-                    headers=self._get_headers(),
-                    timeout=30.0
-                )
-                
-                if response.status_code in [200, 201]:
-                    refund_response = response.json()
-                    
-                    logger.info(f"Refund processed successfully: {refund_id}")
-                    
-                    return {
-                        "success": True,
-                        "refund_id": refund_response.get("cf_refund_id"),
-                        "refund_status": refund_response.get("refund_status"),
-                        "refund_amount": refund_response.get("refund_amount"),
-                        "created_at": refund_response.get("created_at"),
-                    }
-                else:
-                    error_data = response.json() if response.text else {}
-                    return {
-                        "success": False,
-                        "error": error_data.get("message", "Unknown error"),
-                        "status_code": response.status_code,
-                    }
         
         except Exception as e:
-            logger.error(f"Error processing refund: {str(e)}", exc_info=True)
+            logger.error(f"Error initiating payment: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }
+    
+    async def confirm_payment(
+        self,
+        order_id: str,
+        otp: str,
+        payment_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Confirm payment - Step 2: Verify OTP and complete payment.
+        
+        This verifies the OTP entered by customer and marks payment as complete.
+        In production, this would also call Cashfree's payment API.
+        
+        Args:
+            order_id: Cashfree order ID
+            otp: OTP entered by customer
+            payment_id: Optional payment ID (not used currently)
+            
+        Returns:
+            Dict with payment confirmation status
+        """
+        try:
+            logger.info(f"Confirming payment with OTP for order: {order_id}")
+            
+            # Verify OTP
+            is_valid = otp_store.verify_otp(order_id, otp)
+            
+            if not is_valid:
+                logger.warning(f"Invalid or expired OTP for order: {order_id}")
+                return {
+                    "success": False,
+                    "error": "Invalid or expired OTP",
+                    "message": "The OTP you entered is incorrect or has expired. Please try again.",
+                }
+            
+            # OTP verified successfully
+            logger.info(f"OTP verified successfully for order: {order_id}")
+            
+            # Get order details
+            order_status = await self.get_order_status(order_id)
+            order_amount = order_status.get("order_amount", 0.0)
+            
+            # In production, would call Cashfree payment API here
+            # For now, simulate successful payment
+            
+            # Delete OTP after successful verification
+            otp_store.delete_otp(order_id)
+            
+            return {
+                "success": True,
+                "payment_status": "SUCCESS",
+                "order_id": order_id,
+                "payment_amount": order_amount,
+                "payment_time": datetime.now().isoformat(),
+                "message": "Payment completed successfully!",
+                "confirmed_at": datetime.now().isoformat(),
+            }
+        
+        except Exception as e:
+            logger.error(f"Error confirming payment: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
