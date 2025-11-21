@@ -24,16 +24,8 @@ from banking_api import BankingAPI
 from mcp_server.cache import cache_manager
 from mcp_server.masking import mask_account_number, mask_merchant_info
 
-# Import all tool functions
+# Import tool functions that are still needed
 from tools import (
-    get_balance_tool,
-    get_credit_limit_tool,
-    get_transactions_tool,
-    get_loans_tool,
-    make_payment_tool,
-    set_alert_tool,
-    get_alerts_tool,
-    get_interest_rates_tool,
     get_current_date_time_tool,
     get_user_details_tool,
     get_beneficiaries_tool,
@@ -364,39 +356,46 @@ async def get_loans(jwt_token: str) -> List[dict]:
 
 
 @mcp.tool()
-async def make_payment(
+async def initiate_payment(
     jwt_token: str,
     from_account: str,
     to_account: str,
     amount: float,
-    description: str = ""
+    description: str = "",
+    tool_call_id: str = "",
+    platform: str = "web"
 ) -> dict:
     """
-    Make a payment or transfer between accounts.
+    Initiate a payment or transfer between accounts with elicitation.
+    
+    This tool initiates a payment and returns an elicitation request for OTP/confirmation.
+    The payment will be completed after the user provides the required confirmation.
     
     Args:
         jwt_token: JWT authentication token with 'transact' scope
         from_account: Source account type ('checking', 'savings')
-        to_account: Destination account or payee name
+        to_account: Destination account or payee name (beneficiary nickname or account number)
         amount: Amount to transfer
         description: Optional description for the transaction
+        tool_call_id: Tool call ID for tracking (optional)
+        platform: Platform type (web/mobile) for elicitation requirements
         
     Returns:
-        Payment confirmation with details
+        Elicitation request with payment session details
     """
-    logger.info("Payment request received")
+    logger.info("Payment initiation request received")
     
     try:
         # Authenticate user with transact scope
         user = get_user_from_token(jwt_token, required_scope="transact")
         logger.info(
-            f"Payment request for user_id: {user.user_id}, "
+            f"Payment initiation for user_id: {user.user_id}, "
             f"from: {from_account}, to: {to_account}, amount: {amount}"
         )
         
-        # Query banking API with JWT token
+        # Call banking API to initiate payment (generates OTP)
         banking_api = BankingAPI()
-        result = await banking_api.make_payment(
+        initiation_result = await banking_api.initiate_payment(
             user.user_id,
             from_account,
             to_account,
@@ -405,16 +404,33 @@ async def make_payment(
             jwt_token=jwt_token
         )
         
-        logger.info(
-            f"Payment successful for user_id: {user.user_id}, "
-            f"confirmation: {result['confirmation_number']}"
+        # Create elicitation response with payment session details
+        elicitation_response = create_payment_elicitation_response(
+            user_id=user.user_id,
+            from_account=from_account,
+            to_account=to_account,
+            amount=amount,
+            description=description,
+            tool_call_id=tool_call_id,
+            platform=platform,
+            payment_session_id=initiation_result.get("paymentSessionId"),
+            transaction_details=initiation_result.get("transaction", {})
         )
         
-        return result
+        logger.info(
+            f"Created elicitation {elicitation_response['elicitation_id']} "
+            f"for payment by user_id: {user.user_id}, "
+            f"session: {initiation_result.get('paymentSessionId')}"
+        )
+        
+        return elicitation_response
         
     except ValueError as e:
-        logger.warning(f"Payment error: {e}")
-        raise ValueError(f"Payment failed: {str(e)}")
+        logger.warning(f"Payment initiation error: {e}")
+        raise ValueError(f"Payment initiation failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error initiating payment: {e}")
+        raise ValueError(f"Failed to initiate payment: {str(e)}")
 
 
 @mcp.tool()
@@ -664,67 +680,52 @@ async def get_transfer_contacts(jwt_token: str) -> List[dict]:
 
 
 @mcp.tool()
-async def make_payment_with_elicitation(
+async def confirm_payment(
     jwt_token: str,
-    from_account: str,
-    to_account: str,
-    amount: float,
-    description: str = "",
-    tool_call_id: str = "",
-    platform: str = "web"
+    payment_session_id: str,
+    otp_code: str
 ) -> dict:
     """
-    Make a payment with elicitation (OTP/confirmation) requirement.
+    Confirm a payment using OTP code.
     
-    This tool returns an elicitation request instead of immediately processing payment.
-    Use this for testing the elicitation flow without actual Cashfree integration.
+    This completes a payment that was previously initiated with initiate_payment.
     
     Args:
         jwt_token: JWT authentication token with 'transact' scope
-        from_account: Source account type ('checking', 'savings')
-        to_account: Destination account or payee name
-        amount: Amount to transfer
-        description: Optional description for the transaction
-        tool_call_id: Tool call ID for tracking (optional)
-        platform: Platform type (web/mobile)
+        payment_session_id: Payment session ID from initiate_payment
+        otp_code: OTP code sent to user's registered contact
         
     Returns:
-        Elicitation request with schema and suspended arguments
+        Payment confirmation with transaction details
     """
-    logger.info("Payment with elicitation request received")
+    logger.info(f"Payment confirmation request received for session: {payment_session_id}")
     
     try:
         # Authenticate user with transact scope
         user = get_user_from_token(jwt_token, required_scope="transact")
-        logger.info(
-            f"Payment elicitation request for user_id: {user.user_id}, "
-            f"from: {from_account}, to: {to_account}, amount: {amount}"
-        )
+        logger.info(f"Payment confirmation for user_id: {user.user_id}")
         
-        # Create elicitation response
-        elicitation_response = create_payment_elicitation_response(
-            user_id=user.user_id,
-            from_account=from_account,
-            to_account=to_account,
-            amount=amount,
-            description=description,
-            tool_call_id=tool_call_id,
-            platform=platform
+        # Call banking API to confirm payment
+        banking_api = BankingAPI()
+        result = await banking_api.confirm_payment(
+            payment_session_id,
+            otp_code,
+            jwt_token
         )
         
         logger.info(
-            f"Created elicitation {elicitation_response['elicitation_id']} "
-            f"for payment by user_id: {user.user_id}"
+            f"Payment confirmed for user_id: {user.user_id}, "
+            f"confirmation: {result.get('confirmation_number')}"
         )
         
-        return elicitation_response
+        return result
         
     except ValueError as e:
-        logger.warning(f"Payment elicitation error: {e}")
-        raise ValueError(f"Payment elicitation failed: {str(e)}")
+        logger.warning(f"Payment confirmation error: {e}")
+        raise ValueError(f"Payment confirmation failed: {str(e)}")
     except Exception as e:
-        logger.error(f"Error creating payment elicitation: {e}")
-        raise ValueError(f"Failed to create payment elicitation: {str(e)}")
+        logger.error(f"Error confirming payment: {e}")
+        raise ValueError(f"Failed to confirm payment: {str(e)}")
 
 
 if __name__ == "__main__":

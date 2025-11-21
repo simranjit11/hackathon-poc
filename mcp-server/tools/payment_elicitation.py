@@ -19,13 +19,15 @@ def create_payment_elicitation_response(
     amount: float,
     description: str = "",
     tool_call_id: str = None,
-    platform: str = "web"
+    platform: str = "web",
+    payment_session_id: str = None,
+    transaction_details: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Create elicitation response for payment confirmation.
     
-    This simulates an MCP tool returning an elicitation requirement
-    instead of immediately processing the payment.
+    This creates an elicitation request that includes the payment session ID
+    from the backend API, allowing the payment to be completed after OTP verification.
     
     Args:
         user_id: User identifier
@@ -35,11 +37,13 @@ def create_payment_elicitation_response(
         description: Payment description
         tool_call_id: Tool call ID for tracking
         platform: Platform type (web/mobile)
+        payment_session_id: Payment session ID from backend API
+        transaction_details: Transaction details from initiation
         
     Returns:
         Elicitation response dict
     """
-    elicitation_id = str(uuid.uuid4())
+    elicitation_id = payment_session_id or str(uuid.uuid4())
     
     # Determine elicitation type based on amount
     # High value transactions require OTP
@@ -107,6 +111,7 @@ def create_payment_elicitation_response(
     response = {
         "status": "elicitation_required",
         "elicitation_id": elicitation_id,
+        "payment_session_id": payment_session_id,
         "tool_call_id": tool_call_id or str(uuid.uuid4()),
         "schema": schema,
         "suspended_arguments": {
@@ -114,8 +119,10 @@ def create_payment_elicitation_response(
             "from_account": from_account,
             "to_account": to_account,
             "amount": amount,
-            "description": description
-        }
+            "description": description,
+            "payment_session_id": payment_session_id
+        },
+        "transaction_details": transaction_details or {}
     }
     
     logger.info(
