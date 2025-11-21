@@ -47,7 +47,8 @@ class AuthenticatedMCPTools:
             "get_interest_rates": ["read"],
             "get_current_date_time": ["read"],
             "get_user_details": ["read"],  # Get user profile information
-            "make_payment": ["transact"],
+            "get_transfer_contacts": ["read"],  # Get beneficiaries/contacts
+            "make_payment_with_elicitation": ["transact"],
             "set_alert": ["configure"],
         }
     
@@ -101,52 +102,57 @@ class AuthenticatedMCPTools:
             {
                 "name": "get_balance",
                 "description": "Get account balances for the authenticated user. Optionally filter by account type (checking, savings, credit_card). Returns list of accounts with balances.",
-                "func": self._create_tool_func("get_balance"),
+                "func": self._create_tool_func_with_params("get_balance"),
             },
             {
                 "name": "get_transactions",
                 "description": "Get transaction history for the authenticated user. Can filter by account_type (checking, savings, credit_card), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), and limit (default: 10, max: 100). Returns list of recent transactions.",
-                "func": self._create_tool_func("get_transactions"),
+                "func": self._create_tool_func_with_params("get_transactions"),
             },
             {
                 "name": "get_loans",
                 "description": "Get loan information for the authenticated user including balance, interest rate, monthly payment, and remaining term. Returns list of loans.",
-                "func": self._create_tool_func("get_loans"),
+                "func": self._create_tool_func_no_params("get_loans"),
             },
             {
                 "name": "get_credit_limit",
                 "description": "Get credit card limits and available credit for the authenticated user. Returns credit limit information.",
-                "func": self._create_tool_func("get_credit_limit"),
+                "func": self._create_tool_func_no_params("get_credit_limit"),
             },
             {
                 "name": "get_alerts",
                 "description": "Get active payment alerts and reminders for the authenticated user. Returns list of alerts.",
-                "func": self._create_tool_func("get_alerts"),
+                "func": self._create_tool_func_no_params("get_alerts"),
             },
             {
                 "name": "get_interest_rates",
                 "description": "Get current interest rates for various banking products (deposit accounts, credit products, mortgages). Returns formatted interest rates information.",
-                "func": self._create_tool_func("get_interest_rates"),
+                "func": self._create_tool_func_no_params("get_interest_rates"),
             },
             {
                 "name": "get_current_date_time",
                 "description": "Get the current date and time. Returns formatted date/time string.",
-                "func": self._create_tool_func("get_current_date_time"),
+                "func": self._create_tool_func_no_params("get_current_date_time"),
             },
             {
                 "name": "get_user_details",
                 "description": "Get user profile details including email, name, roles, and permissions. Returns user information dictionary.",
-                "func": self._create_tool_func("get_user_details"),
+                "func": self._create_tool_func_no_params("get_user_details"),
             },
             {
-                "name": "make_payment",
-                "description": "Make a payment or transfer funds. Requires to_account (recipient account number), amount (payment amount), and optional description. Returns payment confirmation.",
-                "func": self._create_tool_func("make_payment"),
+                "name": "get_transfer_contacts",
+                "description": "Get list of saved contacts/beneficiaries for transfers. Useful for resolving names like 'Pay Bob' to actual payment details. Returns list of beneficiary dictionaries with nickname and payment information.",
+                "func": self._create_tool_func_no_params("get_transfer_contacts"),
+            },
+            {
+                "name": "make_payment_with_elicitation",
+                "description": "Make a payment or transfer funds with user confirmation (OTP/approval). Use this for all payments. Requires from_account (source account), to_account (recipient account number), amount (payment amount), and optional description. Returns elicitation request for user confirmation.",
+                "func": self._create_tool_func_with_params("make_payment_with_elicitation"),
             },
             {
                 "name": "set_alert",
                 "description": "Set up a payment alert or reminder. Requires alert_type (e.g., 'low_balance', 'payment_due'), amount (threshold amount), and optional description. Returns alert confirmation.",
-                "func": self._create_tool_func("set_alert"),
+                "func": self._create_tool_func_with_params("set_alert"),
             },
         ]
         
@@ -166,18 +172,22 @@ class AuthenticatedMCPTools:
         logger.info(f"Created {len(tools)} MCP tools for Agno agent")
         return tools
     
-    def _create_tool_func(self, tool_name: str):
+    def _create_tool_func_no_params(self, tool_name: str):
         """
-        Create an async function for a specific tool.
-        This function will be converted to a Function object by Agno.
+        Create an async function for tools that take no parameters.
+        """
+        async def tool_func() -> Any:
+            """Tool function that calls MCP server via HTTP with JWT."""
+            return await self._call_tool(tool_name)
         
-        Args:
-            tool_name: Name of the tool to create a function for
-            
-        Returns:
-            Async function that calls the MCP tool
+        return tool_func
+    
+    def _create_tool_func_with_params(self, tool_name: str):
         """
-        async def tool_func(**kwargs: Dict[str, Any]) -> Any:
+        Create an async function for tools that accept parameters.
+        Uses **kwargs to accept any parameters that will be passed to MCP.
+        """
+        async def tool_func(**kwargs: Any) -> Any:
             """Tool function that calls MCP server via HTTP with JWT."""
             return await self._call_tool(tool_name, **kwargs)
         

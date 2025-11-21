@@ -24,6 +24,14 @@ from banking_api import BankingAPI
 from mcp_server.cache import cache_manager
 from mcp_server.masking import mask_account_number, mask_merchant_info
 
+# Import tool functions that are still needed
+from tools import (
+    get_current_date_time_tool,
+    get_user_details_tool,
+    get_beneficiaries_tool,
+    create_payment_elicitation_response,
+)
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -193,9 +201,6 @@ async def get_balance(
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving balance: {e}")
-        raise ValueError(f"Failed to retrieve account balances: {str(e)}")
 
 
 @mcp.tool()
@@ -288,9 +293,6 @@ async def get_transactions(
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving transactions: {e}")
-        raise ValueError(f"Failed to retrieve transactions: {str(e)}")
 
 
 @mcp.tool()
@@ -351,45 +353,49 @@ async def get_loans(jwt_token: str) -> List[dict]:
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving loans: {e}")
-        raise ValueError(f"Failed to retrieve loan information: {str(e)}")
 
 
 @mcp.tool()
-async def make_payment(
+async def initiate_payment(
     jwt_token: str,
     from_account: str,
     to_account: str,
     amount: float,
-    description: str = ""
+    description: str = "",
+    tool_call_id: str = "",
+    platform: str = "web"
 ) -> dict:
     """
-    Make a payment or transfer between accounts.
+    Initiate a payment or transfer between accounts with elicitation.
+    
+    This tool initiates a payment and returns an elicitation request for OTP/confirmation.
+    The payment will be completed after the user provides the required confirmation.
     
     Args:
         jwt_token: JWT authentication token with 'transact' scope
         from_account: Source account type ('checking', 'savings')
-        to_account: Destination account or payee name
+        to_account: Destination account or payee name (beneficiary nickname or account number)
         amount: Amount to transfer
         description: Optional description for the transaction
+        tool_call_id: Tool call ID for tracking (optional)
+        platform: Platform type (web/mobile) for elicitation requirements
         
     Returns:
-        Payment confirmation with details
+        Elicitation request with payment session details
     """
-    logger.info("Payment request received")
+    logger.info("Payment initiation request received")
     
     try:
         # Authenticate user with transact scope
         user = get_user_from_token(jwt_token, required_scope="transact")
         logger.info(
-            f"Payment request for user_id: {user.user_id}, "
+            f"Payment initiation for user_id: {user.user_id}, "
             f"from: {from_account}, to: {to_account}, amount: {amount}"
         )
         
-        # Query banking API with JWT token
+        # Call banking API to initiate payment (generates OTP)
         banking_api = BankingAPI()
-        result = await banking_api.make_payment(
+        initiation_result = await banking_api.initiate_payment(
             user.user_id,
             from_account,
             to_account,
@@ -398,19 +404,33 @@ async def make_payment(
             jwt_token=jwt_token
         )
         
-        logger.info(
-            f"Payment successful for user_id: {user.user_id}, "
-            f"confirmation: {result['confirmation_number']}"
+        # Create elicitation response with payment session details
+        elicitation_response = create_payment_elicitation_response(
+            user_id=user.user_id,
+            from_account=from_account,
+            to_account=to_account,
+            amount=amount,
+            description=description,
+            tool_call_id=tool_call_id,
+            platform=platform,
+            payment_session_id=initiation_result.get("paymentSessionId"),
+            transaction_details=initiation_result.get("transaction", {})
         )
         
-        return result
+        logger.info(
+            f"Created elicitation {elicitation_response['elicitation_id']} "
+            f"for payment by user_id: {user.user_id}, "
+            f"session: {initiation_result.get('paymentSessionId')}"
+        )
+        
+        return elicitation_response
         
     except ValueError as e:
-        logger.warning(f"Payment error: {e}")
-        raise ValueError(f"Payment failed: {str(e)}")
+        logger.warning(f"Payment initiation error: {e}")
+        raise ValueError(f"Payment initiation failed: {str(e)}")
     except Exception as e:
-        logger.error(f"Error processing payment: {e}")
-        raise ValueError(f"Failed to process payment: {str(e)}")
+        logger.error(f"Error initiating payment: {e}")
+        raise ValueError(f"Failed to initiate payment: {str(e)}")
 
 
 @mcp.tool()
@@ -474,9 +494,6 @@ async def get_credit_limit(jwt_token: str) -> dict:
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving credit limit: {e}")
-        raise ValueError(f"Failed to retrieve credit limit: {str(e)}")
 
 
 @mcp.tool()
@@ -534,9 +551,6 @@ async def set_alert(
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error setting alert: {e}")
-        raise ValueError(f"Failed to set alert: {str(e)}")
 
 
 @mcp.tool()
@@ -592,9 +606,6 @@ async def get_alerts(jwt_token: str) -> List[dict]:
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving alerts: {e}")
-        raise ValueError(f"Failed to retrieve alerts: {str(e)}")
 
 
 @mcp.tool()
@@ -614,50 +625,11 @@ async def get_user_details(jwt_token: str) -> dict:
     try:
         # Authenticate user and extract user_id
         user = get_user_from_token(jwt_token)
-        logger.info(f"Get user details request for user_id: {user.user_id}")
-        
-        # Fetch user details from backend API using API key authentication
-        try:
-            from backend_client import get_backend_client
-            backend_client = get_backend_client()
-            user_details = await backend_client.get_user_details(user.user_id)
-            
-            logger.info(
-                f"User details retrieved for user_id: {user.user_id}, "
-                f"email: {user_details.get('email')}"
-            )
-            
-            # Return formatted user details
-            return {
-                "user_id": user_details.get("id"),
-                "email": user_details.get("email"),
-                "name": user_details.get("name") or "Customer",
-                "roles": user_details.get("roles", []),
-                "permissions": user_details.get("permissions", []),
-                "created_at": user_details.get("createdAt"),
-                "last_login_at": user_details.get("lastLoginAt"),
-            }
-        except Exception as api_error:
-            # If backend API fails, return basic info from JWT
-            logger.warning(
-                f"Failed to fetch user details from backend API: {api_error}. "
-                f"Returning basic info from JWT."
-            )
-            return {
-                "user_id": user.user_id,
-                "email": f"user_{user.user_id}@example.com",  # Fallback
-                "name": "Customer",
-                "roles": user.scopes,  # Use scopes as roles fallback
-                "permissions": user.scopes,
-                "note": "Backend API unavailable, using fallback data",
-            }
+        return await get_user_details_tool(user)
         
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving user details: {e}")
-        raise ValueError(f"Failed to retrieve user details: {str(e)}")
 
 
 @mcp.tool()
@@ -676,17 +648,11 @@ async def get_current_date_time(jwt_token: str) -> str:
     try:
         # Authenticate user
         user = get_user_from_token(jwt_token)
-        
-        from datetime import datetime
-        current_datetime = datetime.now().strftime("%B %d, %Y at %I:%M %p")
-        return f"The current date and time is {current_datetime}"
+        return await get_current_date_time_tool(user)
         
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error retrieving date/time: {e}")
-        raise ValueError(f"Failed to retrieve date/time: {str(e)}")
 
 
 @mcp.tool()
@@ -697,7 +663,7 @@ async def get_transfer_contacts(jwt_token: str) -> List[dict]:
     
     Args:
         jwt_token: JWT authentication token with 'read' scope
-        
+    
     Returns:
         List of beneficiary dictionaries with nickname and payment details
     """
@@ -706,26 +672,60 @@ async def get_transfer_contacts(jwt_token: str) -> List[dict]:
     try:
         # Authenticate user
         user = get_user_from_token(jwt_token)
-        logger.info(f"Get contacts request for user_id: {user.user_id}")
-        
-        # Fetch beneficiaries from backend API
-        from backend_client import get_backend_client
-        backend_client = get_backend_client()
-        beneficiaries = await backend_client.get_beneficiaries(user.user_id)
-        
-        logger.info(
-            f"Contacts retrieved for user_id: {user.user_id}, "
-            f"count: {len(beneficiaries)}"
-        )
-        
-        return beneficiaries
+        return await get_beneficiaries_tool(user)
         
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
+
+
+@mcp.tool()
+async def confirm_payment(
+    jwt_token: str,
+    payment_session_id: str,
+    otp_code: str
+) -> dict:
+    """
+    Confirm a payment using OTP code.
+    
+    This completes a payment that was previously initiated with initiate_payment.
+    
+    Args:
+        jwt_token: JWT authentication token with 'transact' scope
+        payment_session_id: Payment session ID from initiate_payment
+        otp_code: OTP code sent to user's registered contact
+        
+    Returns:
+        Payment confirmation with transaction details
+    """
+    logger.info(f"Payment confirmation request received for session: {payment_session_id}")
+    
+    try:
+        # Authenticate user with transact scope
+        user = get_user_from_token(jwt_token, required_scope="transact")
+        logger.info(f"Payment confirmation for user_id: {user.user_id}")
+        
+        # Call banking API to confirm payment
+        banking_api = BankingAPI()
+        result = await banking_api.confirm_payment(
+            payment_session_id,
+            otp_code,
+            jwt_token
+        )
+        
+        logger.info(
+            f"Payment confirmed for user_id: {user.user_id}, "
+            f"confirmation: {result.get('confirmation_number')}"
+        )
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Payment confirmation error: {e}")
+        raise ValueError(f"Payment confirmation failed: {str(e)}")
     except Exception as e:
-        logger.error(f"Error retrieving contacts: {e}")
-        raise ValueError(f"Failed to retrieve contacts: {str(e)}")
+        logger.error(f"Error confirming payment: {e}")
+        raise ValueError(f"Failed to confirm payment: {str(e)}")
 
 
 if __name__ == "__main__":

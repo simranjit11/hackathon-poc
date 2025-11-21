@@ -29,6 +29,9 @@ from agno.agent import Agent as AgnoAgent
 from agno.models.openai import OpenAIChat
 from ai_gateway import AIGateway
 from pii_masking import sanitize_text, is_pii_masking_enabled
+from elicitation_manager import get_elicitation_manager
+from elicitation_response_handler import get_response_handler
+from agno_redis_storage import get_agno_storage
 
 from datetime import datetime, timedelta, timezone
 import os
@@ -104,7 +107,13 @@ class Assistant(Agent):
                 )
                 logger.info(f"Using OpenAI API directly with model: {model_id}")
             
+            # Get Redis database for session persistence
+            agno_storage = get_agno_storage()
+            db = agno_storage.get_db()
+            
             # Initialize Agno agent with model (via AI Gateway or OpenAI) and MCP tools
+            # Configure with Redis database for conversation memory
+            # Based on Agno docs: https://docs.agno.com/concepts/agents/sessions
             self.agno_agent = AgnoAgent(
                 name="banking_assistant",
                 model=model,
@@ -128,8 +137,17 @@ Always call the appropriate tool first, then use the tool's response to answer t
 
 Keep responses clear, professional, and based on actual tool responses.""",
                 markdown=True,
+                # Session and database configuration for conversation memory
+                db=db,  # Redis database for persistent memory
+                session_id=self.session_id,  # Use room_name as session_id to maintain context across the conversation
+                user_id=self.user_id,  # Track sessions per user
+                add_history_to_context=True,  # Include conversation history in context
+                num_history_runs=10,  # Keep last 10 exchanges in memory
+                # Add session state for maintaining conversation context
+                add_session_state_to_context=True,
+                session_state={},  # Initialize empty state that will be persisted
             )
-            logger.info(f"Initialized Agno agent with MCP server tools (auto-discovered) for user_id: {self.user_id}")
+            logger.info(f"Initialized Agno agent with Redis storage and session context for user_id: {self.user_id}, session_id: {self.session_id}")
     
     async def llm_node(
         self, 
@@ -352,6 +370,71 @@ async def entrypoint(ctx: agents.JobContext):
         # turn_detection removed - VAD handles voice activity detection without model downloads
     )
 
+    # Initialize elicitation handler
+    elicitation_manager = get_elicitation_manager()
+    response_handler = get_response_handler()
+    
+    # Setup data channel listener for elicitation responses
+    @room.on("data_received")
+    def on_data_received(data_packet):
+        """Handle data channel messages from client (elicitation responses)."""
+        try:
+            # Decode the data
+            payload_bytes = bytes(data_packet.data)
+            payload_str = payload_bytes.decode('utf-8')
+            payload = json.loads(payload_str)
+            
+            logger.info(f"[DataChannel] Received message type: {payload.get('type')}")
+            
+            # Handle elicitation response
+            if payload.get("type") == "elicitation_response":
+                elicitation_id = payload.get("elicitation_id")
+                user_input = payload.get("user_input")
+                biometric_token = payload.get("biometric_token")
+                
+                logger.info(f"[Elicitation] Processing response for {elicitation_id}")
+                
+                # Handle response asynchronously
+                async def handle_async():
+                    try:
+                        result = await response_handler.handle_response(
+                            elicitation_id=elicitation_id,
+                            user_input=user_input,
+                            biometric_token=biometric_token
+                        )
+                        
+                        # Send result back to client
+                        result_json = json.dumps(result)
+                        result_bytes = result_json.encode('utf-8')
+                        await room.local_participant.publish_data(result_bytes)
+                        
+                        # If successful, narrate confirmation to user
+                        if result.get('status') == 'completed':
+                            payment_result = result.get('payment_result', {})
+                            confirmation = payment_result.get('confirmation_number', 'Unknown')
+                            amount = payment_result.get('amount', 0)
+                            
+                            await agent_session.generate_reply(
+                                instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
+                            )
+                        else:
+                            error = result.get('error', 'Unknown error')
+                            await agent_session.generate_reply(
+                                instructions=f"Inform the user that their payment could not be completed: {error}"
+                            )
+                            
+                    except Exception as e:
+                        logger.error(f"[Elicitation] Error handling response: {e}", exc_info=True)
+                
+                # Schedule the async handler
+                import asyncio
+                asyncio.create_task(handle_async())
+                
+        except Exception as e:
+            logger.error(f"[DataChannel] Error processing data: {e}", exc_info=True)
+    
+    logger.info("[DataChannel] Elicitation handler registered")
+
     # Start the session
     await agent_session.start(
         room=room,
@@ -360,7 +443,7 @@ async def entrypoint(ctx: agents.JobContext):
 
     # Generate initial greeting
     await agent_session.generate_reply(
-        instructions="Greet the user professionally as a banking assistant and ask for their customer ID to help with their banking needs."
+        instructions="Greet the user professionally as a banking assistant and ask how you can help with their banking needs today."
     )
 
 if __name__ == "__main__":

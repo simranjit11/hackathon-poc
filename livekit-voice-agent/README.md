@@ -45,9 +45,17 @@ Voice AI agent built with LiveKit Agents framework for banking services.
    
    # Deepgram (alternative STT)
    DEEPGRAM_API_KEY=your-deepgram-key
+   
+   # Redis Configuration - REQUIRED for session context memory
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+   REDIS_PASSWORD=  # Optional, leave empty if no password
+   REDIS_DB=0  # Database number (0-15)
    ```
    
    **Note:** If `AI_GATEWAY_ENDPOINT` and `AI_GATEWAY_API_KEY` are set, the agent will use the APIM gateway. Otherwise, it falls back to direct OpenAI API using `OPENAI_API_KEY`.
+   
+   **Redis Configuration:** Redis is required for the agent to remember conversation context across turns. Without Redis, the agent will not retain previous context.
 
 ## Running the Agent
 
