@@ -153,6 +153,16 @@ export async function createUser(
                     bankName: 'Regular Bank',
                 }
             ]
+        },
+        accounts: {
+            create: [
+                {
+                    accountType: 'savings',
+                    accountNumber: `SAV-${Date.now()}`,
+                    balance: 1000.00,
+                    currency: 'USD',
+                }
+            ]
         }
       },
     });

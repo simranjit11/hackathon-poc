@@ -76,8 +76,7 @@ class Assistant(Agent):
             # Create MCP tools wrapper
             mcp_tools_wrapper = create_agno_mcp_tools(
                 self.user_id, 
-                self.session_id,
-                self.email
+                self.session_id
             )
             
             # Get list of Function objects (these use our HTTP client with JWT)
@@ -130,8 +129,34 @@ When a user asks about:
 - Alerts → Use the get_alerts tool
 - Interest rates → Use the get_interest_rates tool
 - User profile/details → Use the get_user_details tool
-- Making payments/transfers → Use the initiate_payment tool (this will trigger OTP/confirmation elicitation)
 - Setting alerts → Use the set_alert tool
+
+PAYMENT WORKFLOW (CRITICAL - FOLLOW THESE STEPS):
+When a user requests a payment/transfer (e.g., "Send $100 to John", "Pay Bob $50"):
+
+1. FIRST: Call get_transfer_contacts to get the list of saved beneficiaries
+2. THEN: Match the recipient name mentioned by the user against the contact list:
+   - Look for matches by nickname, fullName, or any part of the name
+   - If you find EXACTLY ONE match → Proceed to step 3
+   - If you find MULTIPLE matches (e.g., "John" matches "John Smith" and "John Doe"):
+     * List all matching contacts with their full names
+     * Ask user: "I found multiple contacts named John: John Smith and John Doe. Which one would you like to pay?"
+     * Wait for user clarification, then proceed to step 3
+   - If you find NO matches:
+     * Inform user: "I couldn't find a contact named [name]. Would you like to add them first or provide their account details?"
+     * Do NOT proceed with payment
+
+3. FINALLY: Call initiate_payment with:
+   - to_account: Use the paymentAddress (UPI ID/account number) from the matched contact - NEVER use the name
+   - amount: The amount user specified
+   - from_account: Optional - only if user specified (e.g., "from savings")
+   - description: Optional - can include recipient's full name for clarity
+
+EXAMPLE:
+User: "Send $100 to John"
+Step 1: get_transfer_contacts() → Returns [{"nickname":"John","fullName":"John Jacob","paymentAddress":"john@okicici.com","paymentType":"upi"}]
+Step 2: Found 1 match for "John"
+Step 3: initiate_payment(to_account="john@okicici.com", amount=100, description="Transfer to John Jacob")
 
 Always call the appropriate tool first, then use the tool's response to answer the user's question. Never provide information without calling the tools first.
 

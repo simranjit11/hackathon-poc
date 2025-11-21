@@ -72,6 +72,19 @@ class BankingAPI:
         response.raise_for_status()
         return response.json()
     
+    async def _post_with_api_key(
+        self,
+        endpoint: str,
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Make POST request with API key (server-to-server)."""
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+        headers = {"X-API-Key": self.api_key}
+        response = await self.client.post(endpoint, headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()
+    
     async def get_accounts(
         self,
         user_id: str,
@@ -121,45 +134,23 @@ class BankingAPI:
         jwt_token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get account balances for a user.
+        Get account balances for a user via internal API.
         
         Args:
             user_id: User identifier
             account_type: Optional account type filter
-            jwt_token: Optional JWT token for user-authenticated calls
+            jwt_token: Optional JWT token (not used, kept for backwards compatibility)
             
         Returns:
             List of balance dictionaries
         """
         try:
-            endpoint = "/api/banking/accounts/balance"
+            # Always use internal API with API key authentication
+            accounts = await self.get_accounts(user_id)
             if account_type:
-                endpoint += f"?accountType={account_type}"
+                accounts = [acc for acc in accounts if acc.get("type") == account_type]
+            return accounts
             
-            if jwt_token:
-                result = await self._get_with_token(endpoint, jwt_token)
-            else:
-                # For server-to-server, we need to get accounts and filter
-                accounts = await self.get_accounts(user_id)
-                if account_type:
-                    accounts = [acc for acc in accounts if acc.get("type") == account_type]
-                return accounts
-            
-            balances = result.get("data", [])
-            
-            # Transform to match expected format
-            transformed = []
-            for balance in balances:
-                transformed.append({
-                    "account_type": balance.get("accountType", ""),
-                    "account_number": balance.get("accountNumber", ""),
-                    "balance": float(balance.get("balance", 0)),
-                    "credit_limit": float(balance.get("creditLimit", 0)) if balance.get("creditLimit") else None,
-                    "available_balance": float(balance.get("availableBalance", 0)),
-                    "currency": balance.get("currency", "USD"),
-                })
-            
-            return transformed
         except httpx.HTTPError as e:
             logger.error(f"Failed to fetch account balances: {e}")
             return []
@@ -294,7 +285,7 @@ class BankingAPI:
         jwt_token: str = ""
     ) -> Dict[str, Any]:
         """
-        Initiate a payment (two-step process).
+        Initiate a payment (two-step process) via internal API.
         
         Args:
             user_id: User identifier
@@ -302,24 +293,21 @@ class BankingAPI:
             to_account: Destination (beneficiary nickname, ID, or payment address)
             amount: Amount to transfer
             description: Optional description
-            jwt_token: JWT token for authentication
+            jwt_token: JWT token (not used for internal API)
             
         Returns:
             Payment initiation response with paymentSessionId and otpCode
         """
-        if not jwt_token:
-            raise ValueError("JWT token required for payment initiation")
-        
-        # Build request body - try to detect if to_account is a beneficiary nickname
-        # or a payment address
+        # Build request body for internal API
         payment_data = {
+            "userId": user_id,
             "fromAccount": from_account,
             "amount": amount,
             "description": description or f"Payment to {to_account}",
         }
         
         # Check if to_account looks like a beneficiary nickname (simple heuristic)
-        # In production, you'd check against beneficiary list first
+        # or a payment address
         if "@" in to_account or to_account.startswith("ACC-") or to_account.startswith("CHK-") or to_account.startswith("SAV-"):
             # Looks like a payment address or account number
             payment_data["paymentAddress"] = to_account
@@ -328,9 +316,9 @@ class BankingAPI:
             payment_data["beneficiaryNickname"] = to_account
         
         try:
-            result = await self._post_with_token(
-                "/api/banking/payments/initiate",
-                jwt_token,
+            # Call internal API with API key authentication
+            result = await self._post_with_api_key(
+                "/api/internal/banking/payments/initiate",
                 payment_data
             )
             
@@ -351,29 +339,29 @@ class BankingAPI:
     
     async def confirm_payment(
         self,
+        user_id: str,
         payment_session_id: str,
         otp_code: str,
-        jwt_token: str
+        jwt_token: str = ""
     ) -> Dict[str, Any]:
         """
-        Confirm a payment with OTP.
+        Confirm a payment with OTP via internal API.
         
         Args:
+            user_id: User identifier
             payment_session_id: Payment session ID from initiate_payment
             otp_code: OTP code
-            jwt_token: JWT token for authentication
+            jwt_token: JWT token (not used for internal API)
             
         Returns:
             Payment confirmation response
         """
-        if not jwt_token:
-            raise ValueError("JWT token required for payment confirmation")
-        
         try:
-            result = await self._post_with_token(
-                "/api/banking/payments/confirm",
-                jwt_token,
+            # Call internal API with API key authentication
+            result = await self._post_with_api_key(
+                "/api/internal/banking/payments/confirm",
                 {
+                    "userId": user_id,
                     "paymentSessionId": payment_session_id,
                     "otpCode": otp_code,
                 }
