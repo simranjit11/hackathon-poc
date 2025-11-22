@@ -72,17 +72,21 @@ class Assistant(Agent):
     
     async def _initialize_agno_agent(self):
         """Initialize Agno agent with MCP server tools when user context is available."""
-        if self.agno_agent is None and self.user_id and self.session_id:
+        if self.agno_agent is None:
+            if not self.user_id or not self.session_id:
+                logger.warning("Cannot initialize Agno agent: user_id or session_id not set")
+                logger.warning(f"user_id={self.user_id}, session_id={self.session_id}")
+                return
+            
             # Create MCP tools wrapper
             mcp_tools_wrapper = create_agno_mcp_tools(
                 self.user_id, 
-                self.session_id
+                self.session_id,
+                email=self.email
             )
             
             # Get list of Function objects (these use our HTTP client with JWT)
             mcp_tools = mcp_tools_wrapper.get_tools()
-            logger.info(f"Created {len(mcp_tools)} MCP tools for Agno")
-            
             # Get model ID from environment or use default (gpt-4.1-mini for gateway)
             model_id = os.getenv("AI_MODEL_ID", "gpt-4.1-mini")
             
@@ -91,7 +95,6 @@ class Assistant(Agent):
                 # Use AI Gateway with proper URL structure and headers
                 # agent_id is None, so AIGateway will use hardcoded constant UUID
                 model = AIGateway(model_id=model_id)
-                logger.info(f"Using AI Gateway with model: {model_id}")
             except ValueError as e:
                 # AI Gateway not configured, fall back to OpenAI
                 logger.warning(f"AI Gateway not configured ({e}), falling back to OpenAI")
@@ -104,7 +107,6 @@ class Assistant(Agent):
                     name=os.getenv("AI_MODEL_NAME", "GPT-4.1 Mini"),
                     api_key=openai_api_key,
                 )
-                logger.info(f"Using OpenAI API directly with model: {model_id}")
             
             # Get Redis database for session persistence
             agno_storage = get_agno_storage()
@@ -117,14 +119,19 @@ class Assistant(Agent):
                 name="banking_assistant",
                 model=model,
                 tools=mcp_tools,  # List of Function objects that call MCP server via HTTP with JWT
-                instructions="""You are a helpful and professional banking voice assistant already aware of the user context.
+                instructions="""You are a helpful and professional banking voice assistant.
 
 IMPORTANT: You MUST use the available tools to perform banking operations. Do not make up or guess information.
+
+FOR INITIAL GREETING (when user hasn't spoken yet):
+- If this is the first interaction and you need to greet the user, FIRST call the get_user_details tool to get the user's name
+- Then greet the user by name professionally (e.g., "Hello [name], how can I help you with your banking needs today?")
+- If get_user_details fails, greet generically and ask how you can help
 
 CRITICAL FOR WRITE OPERATIONS (create_reminder, update_reminder, delete_reminder, make_payment):
 - These operations require multiple pieces of information
 - If the user doesn't provide all required information, ASK for it before calling the tool
-- For create_reminder, you need: scheduled_date (ISO 8601 string like "2025-12-20T10:00:00Z"), amount (number), recipient (string), and account_id (string)
+- For create_reminder, you need: scheduled_date, amount, recipient, and account_id
 - For update_reminder, you need: reminder_id (string) and at least one field to update (scheduled_date, amount, recipient, description, account_id, or is_completed)
 - For delete_reminder, you need: reminder_id (string)
 - For make_payment, you need: to_account (string), amount (number), and optionally description (string)
@@ -132,10 +139,15 @@ CRITICAL FOR WRITE OPERATIONS (create_reminder, update_reminder, delete_reminder
 - Collect ALL required information through conversation before calling the tool
 - Once you have all required information, call the tool with primitive values (strings, numbers), NOT objects
 
-CRITICAL: When calling tools, ALWAYS pass parameters as primitive values (strings, numbers, booleans), NOT as objects or dictionaries. For example:
-- scheduled_date should be a string like "2025-12-20T10:00:00Z", NOT {"date": "2025-12-20"}
-- amount should be a number like 50.0, NOT {"value": 50}
-- recipient should be a string like "mom", NOT {"name": "mom"}
+DATE HANDLING (CRITICAL):
+- When users provide dates/times in natural language (e.g., "December 20th at 10 AM", "tomorrow at 2pm", "next Friday at 3:30 PM"), you MUST automatically convert them to ISO 8601 format (e.g., "2025-12-20T10:00:00Z") before calling tools
+- NEVER ask users to provide dates in ISO 8601 format - handle the conversion automatically
+- Use the current date/time as reference when converting relative dates (e.g., "tomorrow", "next week")
+- Always include timezone (use UTC/Z for consistency) when converting dates
+- Examples:
+  * "December 20th at 10 AM" → "2025-12-20T10:00:00Z"
+  * "tomorrow at 2pm" → Calculate tomorrow's date and convert to "2025-12-23T14:00:00Z" (example)
+  * "next Friday at 3:30 PM" → Calculate next Friday and convert to ISO 8601
 
 When a user asks about:
 - Account balances → Use the get_balance tool
@@ -200,7 +212,6 @@ Keep responses clear, professional, and based on actual tool responses.""",
                 add_session_state_to_context=True,
                 session_state={},  # Initialize empty state that will be persisted
             )
-            logger.info(f"Initialized Agno agent with MCP server tools (auto-discovered) for user_id: {self.user_id}")
     
     async def llm_node(
         self, 
@@ -219,6 +230,7 @@ Keep responses clear, professional, and based on actual tool responses.""",
         if not self.agno_agent:
             # Fallback to default if Agno not initialized
             logger.warning("Agno agent not initialized, falling back to default LLM")
+            logger.warning(f"Initialization check: user_id={self.user_id}, session_id={self.session_id}, email={self.email}")
             return super().llm_node(chat_ctx, tools, model_settings)
         
         # Extract user message from LiveKit context
@@ -233,32 +245,19 @@ Keep responses clear, professional, and based on actual tool responses.""",
                         if user_message:
                             # Optionally sanitize PII before sending to Agno (if enabled)
                             sanitized_message = sanitize_text(user_message)
-                            if sanitized_message != user_message:
-                                logger.info(f"Sanitized User Input before Agno: {user_message[:50]}... -> {sanitized_message[:50]}...")
                             user_message = sanitized_message
                         break
-                            
+        
+        # If no user message, this might be an initial greeting
+        # Still use Agno agent so it can call get_user_details for personalized greeting
         if not user_message:
-            # No user message, return default behavior
-            return super().llm_node(chat_ctx, tools, model_settings)
+            user_message = ""  # Empty message, but we'll still call Agno
         
         # Run Agno agent with user message
         # Agno will automatically call MCP tools as needed
         try:
-            # Log that we're about to call Agno
-            logger.info(f"Calling Agno agent with message: {user_message[:100]}...")
-            
-            # Run Agno agent - it should automatically call tools
-            # Note: Since our tools are async, we must use arun() instead of run()
-            logger.info(f"Running Agno agent.arun() with message: {user_message[:50]}...")
-            response = await self.agno_agent.arun(user_message)
-            
-            # Log the response
-            logger.info(f"Agno agent responded. Response type: {type(response)}")
-            if hasattr(response, 'content'):
-                logger.info(f"Response content length: {len(str(response.content))}")
-            if hasattr(response, 'messages'):
-                logger.info(f"Response messages: {len(response.messages) if response.messages else 0}")
+            message_to_send = user_message if user_message else ""
+            response = await self.agno_agent.arun(message_to_send)
             
             # Convert Agno response to LiveKit streaming format
             # Agno returns a RunResponse object with content
@@ -328,10 +327,6 @@ async def entrypoint(ctx: agents.JobContext):
 
     # Check this specific participant (no need to loop over all if we waited for one)
     if participant:
-        print(f"DEBUG: Participant Identity: {participant.identity}")
-        print(f"DEBUG: Metadata type: {type(participant.metadata)}")
-        print(f"DEBUG: Metadata content: {participant.metadata}")
-        
         if participant.metadata:
             try:
                 # Check if metadata is a string (not a MagicMock in console mode)
@@ -352,15 +347,12 @@ async def entrypoint(ctx: agents.JobContext):
                         # Decode without verification to extract claims
                         claims = jwt.get_unverified_claims(token)
                         
-                        logger.info("Successfully extracted user identity from JWT in metadata")
                         user_id = claims.get("user_id") or claims.get("sub")
                         email = claims.get("email")
                         roles = claims.get("roles", ["customer"])
                         permissions = claims.get("permissions", ["read"])
-                    except Exception as jwt_error:
-                        logger.debug(f"Failed to parse metadata as JWT: {jwt_error}")
-
-                logger.debug(f"Error parsing participant metadata: {e}")
+                    except Exception:
+                        pass
 
     # If no metadata found, try to extract from participant identity
     # Fallback: use participant identity if it follows the pattern voice_assistant_user_{user_id}
@@ -382,7 +374,7 @@ async def entrypoint(ctx: agents.JobContext):
     session_manager = get_session_manager()
     if user_id:
         try:
-            session_key = session_manager.create_session(
+            session_manager.create_session(
                 user_id=user_id,
                 email=email or f"user_{user_id}@example.com",
                 roles=roles if isinstance(roles, list) else [roles],
@@ -390,13 +382,8 @@ async def entrypoint(ctx: agents.JobContext):
                 room_name=room_name,
                 platform=platform,
             )
-            print(f"Session initialized: {session_key}")
-            print(f"User: {user_id} ({email}), Roles: {roles}, Permissions: {permissions}")
-        except Exception as e:
-            print(f"Warning: Could not create session: {e}")
-            print("Continuing without session management...")
-    else:
-        print("Warning: No user_id found in participant metadata. Session not created.")
+        except Exception:
+            pass
 
     # Create agent instance
     assistant = Assistant()
@@ -406,7 +393,6 @@ async def entrypoint(ctx: agents.JobContext):
         assistant.user_id = user_id
         assistant.email = email or f"user_{user_id}@example.com"
         assistant.session_id = room_name
-        logger.info(f"Set agent context: user_id={user_id}, email={assistant.email}, session_id={room_name}")
 
     # Create agent session
     # Note: Using VAD (Voice Activity Detection) for turn detection instead of MultilingualModel
@@ -437,15 +423,11 @@ async def entrypoint(ctx: agents.JobContext):
             payload_str = payload_bytes.decode('utf-8')
             payload = json.loads(payload_str)
             
-            logger.info(f"[DataChannel] Received message type: {payload.get('type')}")
-            
             # Handle elicitation response
             if payload.get("type") == "elicitation_response":
                 elicitation_id = payload.get("elicitation_id")
                 user_input = payload.get("user_input")
                 biometric_token = payload.get("biometric_token")
-                
-                logger.info(f"[Elicitation] Processing response for {elicitation_id}")
                 
                 # Handle response asynchronously
                 async def handle_async():
@@ -485,8 +467,6 @@ async def entrypoint(ctx: agents.JobContext):
                 
         except Exception as e:
             logger.error(f"[DataChannel] Error processing data: {e}", exc_info=True)
-    
-    logger.info("[DataChannel] Elicitation handler registered")
 
     # Start the session
     await agent_session.start(

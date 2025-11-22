@@ -2,7 +2,7 @@
 Banking API Client
 ==================
 Client for calling Next.js banking APIs.
-Uses JWT tokens for user-authenticated calls and API keys for server-to-server calls.
+Uses API key authentication for server-to-server calls.
 """
 
 from typing import List, Optional, Dict, Any
@@ -44,39 +44,12 @@ class BankingAPI:
             }
         )
     
-    async def _get_with_token(self, endpoint: str, jwt_token: str) -> Dict[str, Any]:
-        """Make GET request with JWT token."""
-        headers = {"Authorization": f"Bearer {jwt_token}"}
-        response = await self.client.get(endpoint, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    
     async def _get_with_api_key(self, endpoint: str) -> Dict[str, Any]:
         """Make GET request with API key (server-to-server)."""
         if not self.api_key:
             raise ValueError("INTERNAL_API_KEY not configured")
         headers = {"X-API-Key": self.api_key}
         response = await self.client.get(endpoint, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    
-    async def _post_with_token(
-        self,
-        endpoint: str,
-        jwt_token: str,
-        data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Make POST request with JWT token."""
-        headers = {"Authorization": f"Bearer {jwt_token}"}
-        response = await self.client.post(endpoint, headers=headers, json=data)
-        if not response.is_success:
-            # Log error response body for debugging
-            try:
-                error_body = response.json()
-                logger.error(f"API error response: {error_body}")
-            except Exception:
-                error_text = response.text
-                logger.error(f"API error response (non-JSON): {error_text}")
         response.raise_for_status()
         return response.json()
     
@@ -90,31 +63,73 @@ class BankingAPI:
             raise ValueError("INTERNAL_API_KEY not configured")
         headers = {"X-API-Key": self.api_key}
         response = await self.client.post(endpoint, headers=headers, json=data)
+        if not response.is_success:
+            # Log error response body for debugging
+            try:
+                error_body = response.json()
+                logger.error(f"API error response: {error_body}")
+            except Exception:
+                error_text = response.text
+                logger.error(f"API error response (non-JSON): {error_text}")
         response.raise_for_status()
         return response.json()
     
+    async def _put_with_api_key(
+        self,
+        endpoint: str,
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Make PUT request with API key (server-to-server)."""
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+        headers = {"X-API-Key": self.api_key}
+        response = await self.client.put(endpoint, headers=headers, json=data)
+        if not response.is_success:
+            # Log error response body for debugging
+            try:
+                error_body = response.json()
+                logger.error(f"API error response: {error_body}")
+            except Exception:
+                error_text = response.text
+                logger.error(f"API error response (non-JSON): {error_text}")
+        response.raise_for_status()
+        return response.json()
+    
+    async def _delete_with_api_key(
+        self,
+        endpoint: str
+    ) -> bool:
+        """Make DELETE request with API key (server-to-server)."""
+        if not self.api_key:
+            raise ValueError("INTERNAL_API_KEY not configured")
+        headers = {"X-API-Key": self.api_key}
+        response = await self.client.delete(endpoint, headers=headers)
+        if not response.is_success:
+            # Log error response body for debugging
+            try:
+                error_body = response.json()
+                logger.error(f"API error response: {error_body}")
+            except Exception:
+                error_text = response.text
+                logger.error(f"API error response (non-JSON): {error_text}")
+        response.raise_for_status()
+        return True
+    
     async def get_accounts(
         self,
-        user_id: str,
-        jwt_token: Optional[str] = None
+        user_id: str
     ) -> List[Dict[str, Any]]:
         """
         Get all accounts for a user.
         
         Args:
             user_id: User identifier
-            jwt_token: Optional JWT token for user-authenticated calls
             
         Returns:
             List of account dictionaries
         """
         try:
-            if jwt_token:
-                # User-authenticated call
-                result = await self._get_with_token("/api/banking/accounts", jwt_token)
-            else:
-                # Server-to-server call
-                result = await self._get_with_api_key(f"/api/internal/banking/accounts/{user_id}")
+            result = await self._get_with_api_key(f"/api/internal/banking/accounts/{user_id}")
             
             accounts = result.get("data", [])
             
@@ -139,8 +154,7 @@ class BankingAPI:
     async def get_account_balances(
         self,
         user_id: str,
-        account_type: Optional[str] = None,
-        jwt_token: Optional[str] = None
+        account_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get account balances for a user via internal API.
@@ -148,13 +162,11 @@ class BankingAPI:
         Args:
             user_id: User identifier
             account_type: Optional account type filter
-            jwt_token: Optional JWT token (not used, kept for backwards compatibility)
             
         Returns:
             List of balance dictionaries
         """
         try:
-            # Always use internal API with API key authentication
             accounts = await self.get_accounts(user_id)
             if account_type:
                 accounts = [acc for acc in accounts if acc.get("type") == account_type]
@@ -170,8 +182,7 @@ class BankingAPI:
         account_type: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 10,
-        jwt_token: Optional[str] = None
+        limit: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Get transactions for a user.
@@ -182,7 +193,6 @@ class BankingAPI:
             start_date: Optional start date filter (YYYY-MM-DD)
             end_date: Optional end date filter (YYYY-MM-DD)
             limit: Maximum number of transactions
-            jwt_token: Optional JWT token for user-authenticated calls
             
         Returns:
             List of transaction dictionaries
@@ -199,14 +209,7 @@ class BankingAPI:
             if limit:
                 params.append(f"limit={limit}")
             
-            endpoint = "/api/banking/transactions"
-            if params:
-                endpoint += "?" + "&".join(params)
-            
-            if jwt_token:
-                result = await self._get_with_token(endpoint, jwt_token)
-            else:
-                result = await self._get_with_api_key(f"/api/internal/banking/transactions/{user_id}?{'&'.join(params)}")
+            result = await self._get_with_api_key(f"/api/internal/banking/transactions/{user_id}?{'&'.join(params)}")
             
             transactions = result.get("data", [])
             
@@ -242,27 +245,19 @@ class BankingAPI:
     
     async def get_loans(
         self,
-        user_id: str,
-        jwt_token: Optional[str] = None
+        user_id: str
     ) -> List[Dict[str, Any]]:
         """
         Get loans for a user.
         
         Args:
             user_id: User identifier
-            jwt_token: Optional JWT token for user-authenticated calls
             
         Returns:
             List of loan dictionaries
         """
         try:
-            if jwt_token:
-                result = await self._get_with_token("/api/banking/loans", jwt_token)
-            else:
-                # For server-to-server, we'd need an internal endpoint
-                # For now, return empty list or use user token
-                logger.warning("Server-to-server loan endpoint not available, using mock data")
-                return []
+            result = await self._get_with_api_key(f"/api/internal/banking/loans/{user_id}")
             
             loans = result.get("data", [])
             
@@ -290,8 +285,7 @@ class BankingAPI:
         from_account: str,
         to_account: str,
         amount: float,
-        description: str = "",
-        jwt_token: str = ""
+        description: str = ""
     ) -> Dict[str, Any]:
         """
         Initiate a payment (two-step process) via internal API.
@@ -302,7 +296,6 @@ class BankingAPI:
             to_account: Destination (beneficiary nickname, ID, or payment address)
             amount: Amount to transfer
             description: Optional description
-            jwt_token: JWT token (not used for internal API)
             
         Returns:
             Payment initiation response with paymentSessionId and otpCode
@@ -350,8 +343,7 @@ class BankingAPI:
         self,
         user_id: str,
         payment_session_id: str,
-        otp_code: str,
-        jwt_token: str = ""
+        otp_code: str
     ) -> Dict[str, Any]:
         """
         Confirm a payment with OTP via internal API.
@@ -360,7 +352,6 @@ class BankingAPI:
             user_id: User identifier
             payment_session_id: Payment session ID from initiate_payment
             otp_code: OTP code
-            jwt_token: JWT token (not used for internal API)
             
         Returns:
             Payment confirmation response
@@ -402,8 +393,7 @@ class BankingAPI:
         from_account: str,
         to_account: str,
         amount: float,
-        description: str = "",
-        jwt_token: Optional[str] = None
+        description: str = ""
     ) -> Dict[str, Any]:
         """
         Make a payment (legacy method - now uses two-step process).
@@ -415,22 +405,17 @@ class BankingAPI:
             to_account: Destination account or payee name
             amount: Amount to transfer
             description: Optional description
-            jwt_token: JWT token for authentication
             
         Returns:
             Payment confirmation dictionary
         """
-        if not jwt_token:
-            raise ValueError("JWT token required for payments")
-        
         # Step 1: Initiate payment
         initiation = await self.initiate_payment(
             user_id,
             from_account,
             to_account,
             amount,
-            description,
-            jwt_token
+            description
         )
         
         # Step 2: Confirm payment with OTP
@@ -446,9 +431,9 @@ class BankingAPI:
         
         # Confirm the payment
         confirmation = await self.confirm_payment(
+            user_id,
             payment_session_id,
-            otp_code,
-            jwt_token
+            otp_code
         )
         
         return confirmation
@@ -476,8 +461,7 @@ class BankingAPI:
         beneficiary_id: Optional[str] = None,
         beneficiary_nickname: Optional[str] = None,
         account_id: Optional[str] = None,
-        reminder_notification_settings: Optional[Dict[str, Any]] = None,
-        jwt_token: Optional[str] = None
+        reminder_notification_settings: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Create a payment reminder.
@@ -492,19 +476,16 @@ class BankingAPI:
             beneficiary_nickname: Optional beneficiary nickname
             account_id: Account ID for payment (required)
             reminder_notification_settings: Optional notification settings
-            jwt_token: JWT token for authentication
             
         Returns:
             Reminder dictionary
         """
-        if not jwt_token:
-            raise ValueError("JWT token required for creating reminders")
-        
         if not account_id:
             raise ValueError("account_id is required")
         
         try:
             payload = {
+                "userId": user_id,  # Include user_id for internal API
                 "scheduledDate": scheduled_date,
                 "amount": amount,
                 "recipient": recipient,
@@ -529,9 +510,8 @@ class BankingAPI:
             logger.info(f"Creating reminder with payload keys: {list(payload.keys())}")
             logger.debug(f"Creating reminder with payload: {payload}")
             
-            result = await self._post_with_token(
-                "/api/banking/reminders",
-                jwt_token,
+            result = await self._post_with_api_key(
+                "/api/internal/banking/reminders",
                 payload
             )
             
@@ -566,8 +546,7 @@ class BankingAPI:
         user_id: str,
         is_completed: Optional[bool] = None,
         scheduled_date_from: Optional[str] = None,
-        scheduled_date_to: Optional[str] = None,
-        jwt_token: Optional[str] = None
+        scheduled_date_to: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get all payment reminders for a user.
@@ -577,28 +556,23 @@ class BankingAPI:
             is_completed: Optional filter by completion status
             scheduled_date_from: Optional filter by scheduled date from (ISO 8601)
             scheduled_date_to: Optional filter by scheduled date to (ISO 8601)
-            jwt_token: JWT token for authentication
             
         Returns:
             List of reminder dictionaries
         """
-        if not jwt_token:
-            # Return empty list if no token
-            return []
-        
         try:
-            params = {}
+            params = [f"userId={user_id}"]
             if is_completed is not None:
-                params["isCompleted"] = str(is_completed).lower()
+                params.append(f"isCompleted={str(is_completed).lower()}")
             if scheduled_date_from:
-                params["scheduledDateFrom"] = scheduled_date_from
+                params.append(f"scheduledDateFrom={scheduled_date_from}")
             if scheduled_date_to:
-                params["scheduledDateTo"] = scheduled_date_to
+                params.append(f"scheduledDateTo={scheduled_date_to}")
             
-            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-            url = f"/api/banking/reminders?{query_string}" if query_string else "/api/banking/reminders"
+            query_string = "&".join(params)
+            url = f"/api/internal/banking/reminders?{query_string}"
             
-            result = await self._get_with_token(url, jwt_token)
+            result = await self._get_with_api_key(url)
             reminders = result.get("data", [])
             
             # Transform to match expected format
@@ -631,8 +605,7 @@ class BankingAPI:
         beneficiary_nickname: Optional[str] = None,
         account_id: Optional[str] = None,
         is_completed: Optional[bool] = None,
-        reminder_notification_settings: Optional[Dict[str, Any]] = None,
-        jwt_token: Optional[str] = None
+        reminder_notification_settings: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Update a payment reminder.
@@ -649,16 +622,14 @@ class BankingAPI:
             account_id: Optional account ID for payment
             is_completed: Optional completion status
             reminder_notification_settings: Optional notification settings
-            jwt_token: JWT token for authentication
             
         Returns:
             Updated reminder dictionary
         """
-        if not jwt_token:
-            raise ValueError("JWT token required for updating reminders")
-        
         try:
-            payload: Dict[str, Any] = {}
+            payload: Dict[str, Any] = {
+                "userId": user_id
+            }
             
             if scheduled_date is not None:
                 payload["scheduledDate"] = scheduled_date
@@ -679,15 +650,10 @@ class BankingAPI:
             if reminder_notification_settings is not None:
                 payload["reminderNotificationSettings"] = reminder_notification_settings
             
-            # Use PUT method
-            headers = {"Authorization": f"Bearer {jwt_token}"}
-            response = await self.client.put(
-                f"/api/banking/reminders/{reminder_id}",
-                headers=headers,
-                json=payload
+            result = await self._put_with_api_key(
+                f"/api/internal/banking/reminders/{reminder_id}",
+                payload
             )
-            response.raise_for_status()
-            result = response.json()
             
             reminder_data = result.get("data", {})
             return {
@@ -706,8 +672,7 @@ class BankingAPI:
     async def delete_reminder(
         self,
         user_id: str,
-        reminder_id: str,
-        jwt_token: Optional[str] = None
+        reminder_id: str
     ) -> bool:
         """
         Delete a payment reminder.
@@ -715,21 +680,14 @@ class BankingAPI:
         Args:
             user_id: User identifier
             reminder_id: Reminder ID to delete
-            jwt_token: JWT token for authentication
             
         Returns:
             True if successful
         """
-        if not jwt_token:
-            raise ValueError("JWT token required for deleting reminders")
-        
         try:
-            headers = {"Authorization": f"Bearer {jwt_token}"}
-            response = await self.client.delete(
-                f"/api/banking/reminders/{reminder_id}",
-                headers=headers
+            await self._delete_with_api_key(
+                f"/api/internal/banking/reminders/{reminder_id}?userId={user_id}"
             )
-            response.raise_for_status()
             return True
         except httpx.HTTPError as e:
             logger.error(f"Failed to delete reminder: {e}")

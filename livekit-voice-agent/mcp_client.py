@@ -28,9 +28,6 @@ class MCPClient:
         self.jwt_issuer = os.getenv("MCP_JWT_ISSUER", "orchestrator")
         self.jwt_algorithm = os.getenv("MCP_JWT_ALGORITHM", "HS256")
         
-        # Debug log for JWT secret (masked)
-        masked_secret = f"{self.jwt_secret[:4]}...{self.jwt_secret[-4:]}" if len(self.jwt_secret) > 8 else "***"
-        logger.info(f"MCP Client initialized with JWT Secret: {masked_secret}, Issuer: {self.jwt_issuer}")
         
         # HTTP client with timeout and redirect following
         # Configure with proper connection limits and keep-alive to prevent premature disconnections
@@ -97,7 +94,6 @@ class MCPClient:
             algorithm=self.jwt_algorithm
         )
         
-        logger.debug(f"Generated JWT for user_id: {user_id}, email: {payload.get('email')}, scopes: {scopes}, permissions: {scopes}")
         return token
     
     async def _call_mcp_tool(
@@ -170,10 +166,6 @@ class MCPClient:
                 json=jsonrpc_request,
                 headers=headers
             )
-            
-            # Log response details for debugging
-            logger.debug(f"MCP tool call response status: {response.status_code}")
-            logger.debug(f"MCP tool call response headers: {dict(response.headers)}")
             
             response.raise_for_status()
             
