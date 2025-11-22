@@ -158,12 +158,11 @@ async def get_balance(
             logger.info(f"Returning cached balance for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
         balances_data = await banking_api.get_account_balances(
             user.user_id,
-            account_type=account_type,
-            jwt_token=jwt_token
+            account_type=account_type
         )
         
         # Build response with masking
@@ -254,15 +253,14 @@ async def get_transactions(
             logger.info(f"Returning cached transactions for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
         transactions = await banking_api.get_transactions(
             user.user_id,
             account_type=account_type,
             start_date=start_date,
             end_date=end_date,
-            limit=limit,
-            jwt_token=jwt_token
+            limit=limit
         )
         
         # Build response with masking
@@ -322,9 +320,9 @@ async def get_loans(jwt_token: str) -> List[dict]:
             logger.info(f"Returning cached loans for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
-        loans = await banking_api.get_loans(user.user_id, jwt_token=jwt_token)
+        loans = await banking_api.get_loans(user.user_id)
         
         # Build response with masking
         responses = []
@@ -402,8 +400,7 @@ async def initiate_payment(
             from_account,
             to_account,
             amount,
-            description,
-            jwt_token=jwt_token
+            description
         )
         
         # Create elicitation response with payment session details
@@ -453,10 +450,9 @@ async def get_credit_limit(jwt_token: str) -> dict:
         user = get_user_from_token(jwt_token)
         logger.info(f"Credit limit request for user_id: {user.user_id}")
         
-        # Get JWT token from parameter
         # Get balances (specifically credit card)
         banking_api = BankingAPI()
-        accounts = await banking_api.get_accounts(user.user_id, jwt_token=jwt_token)
+        accounts = await banking_api.get_accounts(user.user_id)
         
         # Find credit card account
         credit_card = None
@@ -538,7 +534,7 @@ async def create_reminder(
         if not account_id:
             raise ValueError("account_id is required")
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
         reminder = await banking_api.create_reminder(
             user.user_id,
@@ -549,8 +545,7 @@ async def create_reminder(
             beneficiary_id if beneficiary_id else None,
             beneficiary_nickname if beneficiary_nickname else None,
             account_id,
-            None,  # reminder_notification_settings
-            jwt_token=jwt_token
+            None  # reminder_notification_settings
         )
         
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
@@ -607,14 +602,13 @@ async def get_reminders(
         elif is_completed.lower() == "false":
             is_completed_filter = False
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
         reminders = await banking_api.get_reminders(
             user.user_id,
             is_completed_filter,
             scheduled_date_from if scheduled_date_from else None,
-            scheduled_date_to if scheduled_date_to else None,
-            jwt_token=jwt_token
+            scheduled_date_to if scheduled_date_to else None
         )
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
         
@@ -698,7 +692,7 @@ async def update_reminder(
         elif is_completed.lower() == "false":
             is_completed_bool = False
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
         reminder = await banking_api.update_reminder(
             user.user_id,
@@ -711,8 +705,7 @@ async def update_reminder(
             None,  # beneficiary_nickname
             account_id if account_id else None,
             is_completed_bool,
-            None,  # reminder_notification_settings
-            jwt_token=jwt_token
+            None  # reminder_notification_settings
         )
         
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
@@ -758,12 +751,11 @@ async def delete_reminder(
         user = get_user_from_token(jwt_token, required_scope="configure")
         logger.info(f"Delete reminder request for user_id: {user.user_id}, reminder_id: {reminder_id}")
         
-        # Query banking API with JWT token
+        # Query banking API
         banking_api = BankingAPI()
         await banking_api.delete_reminder(
             user.user_id,
-            reminder_id,
-            jwt_token=jwt_token
+            reminder_id
         )
         
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
@@ -887,8 +879,7 @@ async def confirm_payment(
         banking_api = BankingAPI()
         result = await banking_api.confirm_payment(
             payment_session_id,
-            otp_code,
-            jwt_token
+            otp_code
         )
         
         logger.info(
