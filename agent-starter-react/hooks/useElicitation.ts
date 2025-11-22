@@ -10,6 +10,8 @@ import type {
   ElicitationRequest,
   ElicitationResponse,
   ElicitationMessage,
+} from '@/lib/elicitation-types';
+import {
   isElicitationRequest,
   isElicitationCancellation,
   isElicitationExpiration,

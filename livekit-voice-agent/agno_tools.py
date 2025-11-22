@@ -48,10 +48,9 @@ class AuthenticatedMCPTools:
             "get_current_date_time": ["read"],
             "get_user_details": ["read"],  # Get user profile information
             "get_transfer_contacts": ["read"],  # Get beneficiaries/contacts
-            "make_payment_with_elicitation": ["transact"],
-            "create_reminder": ["configure"],
-            "update_reminder": ["configure"],
-            "delete_reminder": ["configure"],
+            "initiate_payment": ["transact"],  # Initiate payment with elicitation
+            "confirm_payment": ["transact"],  # Confirm payment with OTP
+            "set_alert": ["configure"],
         }
     
     async def _call_tool(self, tool_name: str, **kwargs) -> Any:

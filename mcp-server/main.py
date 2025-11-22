@@ -158,11 +158,12 @@ async def get_balance(
             logger.info(f"Returning cached balance for user_id: {user.user_id}")
             return cached_result
         
-        # Query banking API
+        # Query banking API with internal API (API key authentication)
         banking_api = BankingAPI()
         balances_data = await banking_api.get_account_balances(
             user.user_id,
             account_type=account_type
+            # jwt_token omitted - will use API key authentication
         )
         
         # Build response with masking
@@ -255,12 +256,15 @@ async def get_transactions(
         
         # Query banking API
         banking_api = BankingAPI()
+        # Use internal API with API key authentication (not JWT)
+        # This ensures consistent authentication for all banking operations
         transactions = await banking_api.get_transactions(
             user.user_id,
             account_type=account_type,
             start_date=start_date,
             end_date=end_date,
             limit=limit
+            # jwt_token omitted - will use API key authentication
         )
         
         # Build response with masking
@@ -388,6 +392,41 @@ async def initiate_payment(
     try:
         # Authenticate user with transact scope
         user = get_user_from_token(jwt_token, required_scope="transact")
+        
+        # Auto-select source account if not provided
+        if not from_account:
+            banking_api = BankingAPI()
+            accounts = await banking_api.get_account_balances(
+                user.user_id
+                # jwt_token omitted - will use API key authentication
+            )
+            
+            # Priority: checking > savings > credit_card
+            # Select first available account (balance check disabled for testing)
+            account_priority = ["checking", "savings", "credit_card"]
+            selected_account = None
+            
+            for acc_type in account_priority:
+                for account in accounts:
+                    if account.get("account_type") == acc_type:
+                        selected_account = acc_type
+                        logger.info(f"Auto-selected {acc_type} account")
+                        break
+                if selected_account:
+                    break
+            
+            if not selected_account:
+                # If no accounts found with priority types, use any account
+                if accounts:
+                    selected_account = accounts[0].get("account_type", "savings")
+                    logger.info(f"Auto-selected first available account: {selected_account}")
+                else:
+                    raise ValueError(
+                        f"No accounts found for user. Please create an account first."
+                    )
+            
+            from_account = selected_account
+        
         logger.info(
             f"Payment initiation for user_id: {user.user_id}, "
             f"from: {from_account}, to: {to_account}, amount: {amount}"
@@ -450,9 +489,11 @@ async def get_credit_limit(jwt_token: str) -> dict:
         user = get_user_from_token(jwt_token)
         logger.info(f"Credit limit request for user_id: {user.user_id}")
         
-        # Get balances (specifically credit card)
+        # Get JWT token from parameter
+        # Get balances (specifically credit card) via internal API
         banking_api = BankingAPI()
         accounts = await banking_api.get_accounts(user.user_id)
+        # jwt_token omitted - will use API key authentication
         
         # Find credit card account
         credit_card = None

@@ -64,6 +64,9 @@ class Assistant(Agent):
         # Agno agent will be initialized when user context is available
         self.agno_agent: Optional[AgnoAgent] = None
         
+        # Room reference for sending data channel messages (elicitations)
+        self.room: Optional[Any] = None
+        
         # Log PII masking status
         if is_pii_masking_enabled():
             logger.info("🛡️ PII masking is ENABLED")
@@ -256,12 +259,133 @@ Keep responses clear, professional, and based on actual tool responses.""",
         # Run Agno agent with user message
         # Agno will automatically call MCP tools as needed
         try:
-            message_to_send = user_message if user_message else ""
-            response = await self.agno_agent.arun(message_to_send)
+            # Log that we're about to call Agno
+            logger.info(f"Calling Agno agent with message: {user_message[:100]}...")
             
-            # Convert Agno response to LiveKit streaming format
-            # Agno returns a RunResponse object with content
-            response_text = response.content if hasattr(response, 'content') else str(response)
+            # Run Agno agent - it should automatically call tools
+            # Note: Since our tools are async, we must use arun() instead of run()
+            logger.info(f"Running Agno agent.arun() with message: {user_message[:50]}...")
+            response = await self.agno_agent.arun(user_message)
+            
+            # Log the response
+            logger.info(f"Agno agent responded. Response type: {type(response)}")
+            logger.info(f"Response attributes: {dir(response)}")
+            
+            if hasattr(response, 'content'):
+                logger.info(f"Response content length: {len(str(response.content))}")
+                logger.info(f"Response content (first 200 chars): {str(response.content)[:200]}")
+            if hasattr(response, 'messages'):
+                logger.info(f"Response messages: {len(response.messages) if response.messages else 0}")
+            
+            # Check if any tool calls resulted in elicitation
+            elicitation_response = None
+            
+            # Try different attributes where tool results might be stored
+            tools_attr = None
+            if hasattr(response, 'tools'):
+                tools_attr = response.tools
+                logger.info(f"Found 'tools' attribute with {len(tools_attr) if tools_attr else 0} items")
+            elif hasattr(response, 'tool_calls'):
+                tools_attr = response.tool_calls
+                logger.info(f"Found 'tool_calls' attribute with {len(tools_attr) if tools_attr else 0} items")
+            elif hasattr(response, 'run_response') and hasattr(response.run_response, 'tools'):
+                tools_attr = response.run_response.tools
+                logger.info(f"Found 'run_response.tools' attribute with {len(tools_attr) if tools_attr else 0} items")
+            
+            if tools_attr:
+                logger.info(f"Checking {len(tools_attr)} tool results for elicitation")
+                for idx, tool_result in enumerate(tools_attr):
+                    logger.info(f"Tool result {idx}: type={type(tool_result)}, attrs={dir(tool_result)}")
+                    
+                    # Try to get the result from different possible attributes
+                    result = None
+                    if hasattr(tool_result, 'result'):
+                        result = tool_result.result
+                    elif hasattr(tool_result, 'output'):
+                        result = tool_result.output
+                    elif isinstance(tool_result, dict):
+                        result = tool_result
+                    
+                    if result:
+                        logger.info(f"Tool result {idx} data type: {type(result)}")
+                        logger.info(f"Tool result {idx} data (first 200 chars): {str(result)[:200]}")
+                        
+                        # Parse the result - it might be wrapped in MCP format or be a direct dict
+                        parsed_result = None
+                        
+                        # First, if result is a string, try to evaluate it as a Python literal (dict/list)
+                        if isinstance(result, str):
+                            # Try parsing as JSON first
+                            try:
+                                result = json.loads(result)
+                                logger.info(f"Parsed result from JSON string to: {type(result)}")
+                            except (json.JSONDecodeError, TypeError):
+                                # Try evaluating as Python literal (for string repr of dict)
+                                try:
+                                    import ast
+                                    result = ast.literal_eval(result)
+                                    logger.info(f"Evaluated result from Python literal to: {type(result)}")
+                                except (ValueError, SyntaxError):
+                                    logger.debug(f"Could not parse string as JSON or Python literal: {result[:100]}")
+                        
+                        # Now handle dict results
+                        if isinstance(result, dict):
+                            # Check if it's wrapped in MCP content format
+                            if 'content' in result and isinstance(result['content'], list):
+                                # Extract text from first content item
+                                for content_item in result['content']:
+                                    if isinstance(content_item, dict) and content_item.get('type') == 'text':
+                                        text_value = content_item.get('text', '')
+                                        # Try to parse as JSON
+                                        try:
+                                            parsed_result = json.loads(text_value)
+                                            logger.info(f"✅ Parsed JSON from MCP content.text: {type(parsed_result)}")
+                                            break
+                                        except (json.JSONDecodeError, TypeError):
+                                            logger.debug(f"Could not parse text as JSON: {text_value[:100]}")
+                            else:
+                                # Direct dict, use as-is
+                                parsed_result = result
+                                logger.info(f"Using result dict as-is")
+                        
+                        # Check if the parsed result is an elicitation response
+                        if isinstance(parsed_result, dict) and parsed_result.get('elicitation_id'):
+                            logger.info(f"✅ Found elicitation in tool result: {parsed_result.get('elicitation_id')}")
+                            elicitation_response = parsed_result
+                            break
+            else:
+                logger.warning("No tool results found in response")
+            
+            # If there's an elicitation, send it to the UI via data channel
+            if elicitation_response:
+                logger.info(f"Sending elicitation {elicitation_response.get('elicitation_id')} to UI")
+                
+                # Send elicitation to UI via data channel
+                if self.room:
+                    try:
+                        # Wrap the elicitation in the format expected by the frontend
+                        # Frontend expects: { type: "elicitation", elicitation_id, tool_call_id, schema }
+                        message = {
+                            "type": "elicitation",
+                            "elicitation_id": elicitation_response.get('elicitation_id'),
+                            "tool_call_id": elicitation_response.get('tool_call_id'),
+                            "schema": elicitation_response.get('schema', {}),
+                        }
+                        elicitation_json = json.dumps(message)
+                        elicitation_bytes = elicitation_json.encode('utf-8')
+                        await self.room.local_participant.publish_data(elicitation_bytes)
+                        logger.info(f"Successfully sent elicitation {elicitation_response.get('elicitation_id')} to UI with type='elicitation'")
+                    except Exception as e:
+                        logger.error(f"Failed to send elicitation to UI: {e}")
+                else:
+                    logger.warning("Room not available, cannot send elicitation to UI")
+                
+                # Return a voice response telling user to check their device
+                response_text = "I've sent a payment confirmation request to your device. Please review the details and enter the OTP code to complete the transaction."
+            else:
+                # Convert Agno response to LiveKit streaming format
+                # Agno returns a RunResponse object with content
+                response_text = response.content if hasattr(response, 'content') else str(response)
             
             # Stream the response back as async generator
             async def agno_response_stream():
@@ -393,6 +517,13 @@ async def entrypoint(ctx: agents.JobContext):
         assistant.user_id = user_id
         assistant.email = email or f"user_{user_id}@example.com"
         assistant.session_id = room_name
+<<<<<<< HEAD
+=======
+    
+    # Store room reference for data channel access (elicitations)
+    assistant.room = room
+    logger.info(f"Set agent context: user_id={user_id}, email={assistant.email}, session_id={room_name}")
+>>>>>>> f119990 (Add elicitation flow end to end)
 
     # Create agent session
     # Note: Using VAD (Voice Activity Detection) for turn detection instead of MultilingualModel

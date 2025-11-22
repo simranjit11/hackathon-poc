@@ -2,10 +2,15 @@
  * Elicitation Resume Endpoint
  * ============================
  * Handles resuming payment execution after user provides elicitation response (OTP/confirmation).
+ * 
+ * This endpoint receives the OTP from the frontend and calls the MCP server's
+ * confirm_payment tool to complete the transaction.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { confirmPayment } from '@/lib/banking/payments';
+import { getJWTForUser } from '@/lib/auth/jwt';
 
 // Validation schemas
 const ResumePaymentSchema = z.object({
@@ -19,6 +24,7 @@ const ResumePaymentSchema = z.object({
         to_account: z.string(),
         amount: z.number(),
         description: z.string().optional(),
+        payment_session_id: z.string().optional(),
     }),
 });
 

@@ -2,6 +2,8 @@
 Elicitation Response Handler
 =============================
 Handles elicitation responses from clients and resumes payment execution.
+This handler receives OTP/confirmation from the frontend and calls the MCP server's
+confirm_payment tool to complete the transaction.
 """
 
 import json
@@ -11,22 +13,18 @@ from typing import Dict, Any, Optional
 import httpx
 
 from elicitation_manager import get_elicitation_manager, ElicitationStatus
+from mcp_client import get_mcp_client
 
 logger = logging.getLogger(__name__)
 
 
 class ElicitationResponseHandler:
-    """Handles elicitation responses and payment resumption."""
+    """Handles elicitation responses and payment resumption via MCP tools."""
 
-    def __init__(self, next_js_base_url: str = "http://localhost:3000"):
-        """
-        Initialize response handler.
-        
-        Args:
-            next_js_base_url: Base URL for Next.js API endpoints
-        """
+    def __init__(self):
+        """Initialize response handler with MCP client."""
         self.manager = get_elicitation_manager()
-        self.next_js_base_url = next_js_base_url
+        self.mcp_client = get_mcp_client()
         self.http_client = httpx.AsyncClient(timeout=30.0)
 
     async def handle_response(
@@ -83,14 +81,12 @@ class ElicitationResponseHandler:
                 ElicitationStatus.PROCESSING
             )
 
-            # Step 5: Call Next.js resume endpoint
-            logger.info(f"Calling resume endpoint for {elicitation_id}")
-            result = await self._call_resume_endpoint(
+            # Step 5: Call MCP confirm_payment tool
+            logger.info(f"Calling MCP confirm_payment for {elicitation_id}")
+            result = await self._call_confirm_payment(
                 elicitation_id,
-                state.tool_call_id,
                 user_input,
-                state.suspended_tool_arguments,
-                biometric_token
+                state.suspended_tool_arguments
             )
 
             if result["status"] == "completed":
@@ -137,72 +133,105 @@ class ElicitationResponseHandler:
                 "error": f"Internal error: {str(e)}"
             }
 
-    async def _call_resume_endpoint(
+    async def _call_confirm_payment(
         self,
         elicitation_id: str,
-        tool_call_id: str,
         user_input: Dict[str, Any],
-        suspended_arguments: Dict[str, Any],
-        biometric_token: Optional[str] = None
+        suspended_arguments: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Call Next.js resume endpoint to complete payment.
+        Call MCP confirm_payment tool to complete the payment.
         
         Args:
-            elicitation_id: Elicitation identifier
-            tool_call_id: Tool call ID
-            user_input: User-provided values
-            suspended_arguments: Original payment arguments
-            biometric_token: Optional biometric token
+            elicitation_id: Elicitation identifier (payment_session_id)
+            user_input: User-provided values (must contain otp_code)
+            suspended_arguments: Original payment arguments with user_id
             
         Returns:
-            Resume endpoint response
+            Payment confirmation result
         """
-        url = f"{self.next_js_base_url}/api/elicitation/resume"
-        
-        payload = {
-            "elicitation_id": elicitation_id,
-            "tool_call_id": tool_call_id,
-            "user_input": user_input,
-            "suspended_arguments": suspended_arguments,
-        }
-        
-        if biometric_token:
-            payload["biometric_token"] = biometric_token
-
         try:
-            response = await self.http_client.post(url, json=payload)
-            response.raise_for_status()
-            
-            result = response.json()
-            logger.info(f"Resume endpoint response: {result.get('status')}")
-            
-            return result
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error calling resume endpoint: {e.response.status_code}")
-            try:
-                error_detail = e.response.json()
+            # Extract OTP code from user input
+            otp_code = user_input.get("otp_code", "")
+            if not otp_code:
+                logger.error("No OTP code provided in user input")
                 return {
                     "status": "failed",
-                    "error": error_detail.get("error", "Resume endpoint failed")
+                    "error": "OTP code is required"
                 }
-            except Exception:
+            
+            # Extract user context from suspended arguments
+            user_id = suspended_arguments.get("user_id")
+            payment_session_id = suspended_arguments.get("payment_session_id", elicitation_id)
+            
+            if not user_id:
+                logger.error("No user_id in suspended arguments")
                 return {
                     "status": "failed",
-                    "error": f"HTTP {e.response.status_code}: {e.response.text}"
+                    "error": "Missing user context"
                 }
-        except httpx.HTTPError as e:
-            logger.error(f"Network error calling resume endpoint: {e}")
-            return {
-                "status": "failed",
-                "error": "Network error contacting payment service"
-            }
+            
+            logger.info(
+                f"Confirming payment via MCP: session={payment_session_id}, "
+                f"user={user_id}, otp={otp_code[:2]}***"
+            )
+            
+            # Call MCP confirm_payment tool
+            # This uses the MCP client which handles JWT generation and HTTP transport
+            result = await self.mcp_client._call_mcp_tool(
+                tool_name="confirm_payment",
+                user_id=user_id,
+                session_id="elicitation_handler",  # Session context for JWT
+                scopes=["transact"],  # Confirm payment requires transact scope
+                payment_session_id=payment_session_id,
+                otp_code=otp_code
+            )
+            
+            logger.info(f"MCP confirm_payment result: {result}")
+            
+            # Transform MCP result to expected format
+            if result and not result.get("isError"):
+                # Extract the actual result from MCP content format
+                content = result.get("content", [])
+                if content and isinstance(content, list):
+                    text_content = content[0].get("text", "{}")
+                    try:
+                        payment_data = json.loads(text_content)
+                        return {
+                            "status": "completed",
+                            "payment_result": payment_data
+                        }
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse MCP result: {text_content}")
+                        return {
+                            "status": "failed",
+                            "error": "Invalid response format from payment service"
+                        }
+                
+                # Fallback: return raw result
+                return {
+                    "status": "completed",
+                    "payment_result": result
+                }
+            else:
+                # Payment failed
+                error_msg = "Payment confirmation failed"
+                if result and result.get("content"):
+                    try:
+                        error_msg = result["content"][0].get("text", error_msg)
+                    except (KeyError, IndexError, TypeError):
+                        pass
+                
+                return {
+                    "status": "failed",
+                    "error": error_msg
+                }
+            
         except Exception as e:
-            logger.error(f"Unexpected error calling resume endpoint: {e}")
+            logger.error(f"Error calling MCP confirm_payment: {e}", exc_info=True)
             return {
                 "status": "failed",
-                "error": f"Unexpected error: {str(e)}"
+                "error": f"Failed to confirm payment: {str(e)}"
             }
 
     async def close(self):
@@ -214,10 +243,10 @@ class ElicitationResponseHandler:
 _response_handler: Optional[ElicitationResponseHandler] = None
 
 
-def get_response_handler(next_js_base_url: str = "http://localhost:3000") -> ElicitationResponseHandler:
+def get_response_handler() -> ElicitationResponseHandler:
     """Get or create the global response handler instance."""
     global _response_handler
     if _response_handler is None:
-        _response_handler = ElicitationResponseHandler(next_js_base_url)
+        _response_handler = ElicitationResponseHandler()
     return _response_handler
 
