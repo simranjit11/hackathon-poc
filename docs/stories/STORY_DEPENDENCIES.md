@@ -178,14 +178,8 @@ Journey 2 (Transactional):
 - **Can Start**: After 3.5
 - **Status**: Completes payment flow
 
-### Epic 5: Alerts and Notifications Management
-**Story 3.7: Payment Alerts API**
-- **Dependencies**: 3.0 (Database Schema)
-- **Blocks**: None
-- **Can Start**: After 3.0
-- **Parallel Development**: Can work in parallel with all other stories
-
-**Story 3.8: Notification Preferences API**
+### Epic 5: Payment Reminders Management
+**Story 3.7: Payment Reminders API**
 - **Dependencies**: 3.0 (Database Schema)
 - **Blocks**: None
 - **Can Start**: After 3.0
@@ -218,10 +212,9 @@ Journey 2 (Transactional):
 1. **3.5 Payment Initiation** (after 3.0, 3.1)
 2. **3.6 Payment Confirmation** (after 3.5)
 
-### Phase 4: Alerts and Notifications (Week 2-3)
+### Phase 4: Payment Reminders (Week 2-3)
 **Parallel Development:**
-1. **3.7 Payment Alerts** (after 3.0) ← **Parallel**
-2. **3.8 Notification Preferences** (after 3.0) ← **Parallel**
+1. **3.7 Payment Reminders** (after 3.0) ← **Parallel**
 
 ### Phase 5: Integration (Week 3)
 **Sequential:**

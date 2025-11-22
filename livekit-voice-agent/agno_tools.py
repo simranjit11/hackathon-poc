@@ -43,13 +43,15 @@ class AuthenticatedMCPTools:
             "get_transactions": ["read"],
             "get_loans": ["read"],
             "get_credit_limit": ["read"],
-            "get_alerts": ["read"],
+            "get_reminders": ["read"],
             "get_interest_rates": ["read"],
             "get_current_date_time": ["read"],
             "get_user_details": ["read"],  # Get user profile information
             "get_transfer_contacts": ["read"],  # Get beneficiaries/contacts
-            "initiate_payment": ["transact"],  # Initiate payment with elicitation
-            "set_alert": ["configure"],
+            "make_payment_with_elicitation": ["transact"],
+            "create_reminder": ["configure"],
+            "update_reminder": ["configure"],
+            "delete_reminder": ["configure"],
         }
     
     async def _call_tool(self, tool_name: str, **kwargs) -> Any:
@@ -71,6 +73,30 @@ class AuthenticatedMCPTools:
         # Remove jwt_token if present (we'll add our own)
         kwargs.pop("jwt_token", None)
         
+        # Extract parameters from nested structures if LLM sends them that way
+        # Sometimes the LLM sends {'kwargs': {'param1': 'value1', ...}} instead of flat params
+        extracted_kwargs = {}
+        for key, value in kwargs.items():
+            if key == "kwargs" and isinstance(value, dict):
+                # If there's a 'kwargs' key with a dict value, extract those params
+                extracted_kwargs.update(value)
+            elif isinstance(value, dict) and len(value) == 1:
+                # If a param value is a single-item dict like {'date': '2025-12-20'},
+                # extract the inner value
+                inner_key, inner_value = next(iter(value.items()))
+                extracted_kwargs[key] = inner_value
+            else:
+                extracted_kwargs[key] = value
+        
+        # Filter out None values, empty strings, and empty dicts to avoid validation errors
+        # FastMCP is strict about unexpected keyword arguments
+        filtered_kwargs = {
+            k: v for k, v in extracted_kwargs.items()
+            if v is not None and v != "" and not (isinstance(v, dict) and len(v) == 0)
+        }
+        
+        logger.debug(f"Extracted and filtered kwargs for {tool_name}: {filtered_kwargs}")
+        
         # Call via MCP client which handles JWT generation and HTTP calls
         try:
             result = await self.mcp_client._call_mcp_tool(
@@ -79,7 +105,7 @@ class AuthenticatedMCPTools:
                 self.session_id,
                 scopes,
                 email=self.email,
-                **kwargs
+                **filtered_kwargs
             )
             logger.info(f"✅ MCP Tool {tool_name} succeeded")
             return result
@@ -101,7 +127,7 @@ class AuthenticatedMCPTools:
         tool_definitions = [
             {
                 "name": "get_balance",
-                "description": "Get account balances for the authenticated user. Optionally filter by account type (checking, savings, credit_card). Returns list of accounts with balances.",
+                "description": "Get account balances for the authenticated user. Optionally filter by account type (checking, savings, credit_card). Returns list of accounts with balances and account_id (use account_id for create_reminder).",
                 "func": self._create_tool_func_with_params("get_balance"),
             },
             {
@@ -120,9 +146,9 @@ class AuthenticatedMCPTools:
                 "func": self._create_tool_func_no_params("get_credit_limit"),
             },
             {
-                "name": "get_alerts",
-                "description": "Get active payment alerts and reminders for the authenticated user. Returns list of alerts.",
-                "func": self._create_tool_func_no_params("get_alerts"),
+                "name": "get_reminders",
+                "description": "Get payment reminders for the authenticated user. Optional filters: is_completed (true/false), scheduled_date_from (ISO 8601), scheduled_date_to (ISO 8601). Returns list of reminders with status, amount, recipient, and scheduled date.",
+                "func": self._create_tool_func_with_params("get_reminders"),
             },
             {
                 "name": "get_interest_rates",
@@ -145,14 +171,24 @@ class AuthenticatedMCPTools:
                 "func": self._create_tool_func_no_params("get_transfer_contacts"),
             },
             {
-                "name": "initiate_payment",
-                "description": "Initiate a payment or transfer funds. Triggers elicitation flow requiring user confirmation via OTP. CRITICAL: to_account MUST be the recipient's UPI ID or account number (e.g., 'john@okicici.com'), NOT their name. ALWAYS call get_transfer_contacts first to resolve names to payment addresses. REQUIRED: to_account (UPI ID/account number from contact's paymentAddress field), amount (number). OPTIONAL: from_account (e.g., 'checking', 'savings'), description. Returns elicitation request with payment session details.",
-                "func": self._create_tool_func_with_params("initiate_payment"),
+                "name": "make_payment_with_elicitation",
+                "description": "Make a payment or transfer funds with user confirmation (OTP/approval). Use this for all payments. Requires from_account (source account), to_account (recipient account number), amount (payment amount), and optional description. Returns elicitation request for user confirmation.",
+                "func": self._create_tool_func_with_params("make_payment_with_elicitation"),
             },
             {
-                "name": "set_alert",
-                "description": "Set up a payment alert or reminder. Requires alert_type (e.g., 'low_balance', 'payment_due'), amount (threshold amount), and optional description. Returns alert confirmation.",
-                "func": self._create_tool_func_with_params("set_alert"),
+                "name": "create_reminder",
+                "description": "Create a payment reminder for a future scheduled payment. REQUIRED: scheduled_date (ISO 8601 string like '2025-12-20T10:00:00Z'), amount (number), recipient (string), account_id (string - get this from get_balance tool). OPTIONAL: description (string), beneficiary_id (string), beneficiary_nickname (string). IMPORTANT: All parameters must be primitive values (strings, numbers), NOT objects or dictionaries. Returns reminder confirmation with ID.",
+                "func": self._create_tool_func_with_params("create_reminder"),
+            },
+            {
+                "name": "update_reminder",
+                "description": "Update an existing payment reminder. REQUIRED: reminder_id (string). OPTIONAL: scheduled_date (ISO 8601), amount (number), recipient (string), description (string), account_id (string), is_completed (true/false). Returns updated reminder details.",
+                "func": self._create_tool_func_with_params("update_reminder"),
+            },
+            {
+                "name": "delete_reminder",
+                "description": "Delete a payment reminder. REQUIRED: reminder_id (string). Returns deletion confirmation.",
+                "func": self._create_tool_func_with_params("delete_reminder"),
             },
         ]
         
@@ -194,15 +230,16 @@ class AuthenticatedMCPTools:
         return tool_func
 
 
-def create_agno_mcp_tools(user_id: str, session_id: str):
+def create_agno_mcp_tools(user_id: str, session_id: str, email: Optional[str] = None):
     """
     Create MCP tools wrapper for Agno.
     
     Args:
         user_id: User identifier
         session_id: Session/room identifier
+        email: User email address (optional but recommended)
         
     Returns:
         AuthenticatedMCPTools instance
     """
-    return AuthenticatedMCPTools(user_id, session_id)
+    return AuthenticatedMCPTools(user_id, session_id, email=email)

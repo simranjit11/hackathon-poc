@@ -49,7 +49,7 @@ class Assistant(Agent):
         super().__init__(
             instructions="""You are a helpful and professional banking voice assistant.
             You can help customers with account balances, payments, transfers, transaction history,
-            loan inquiries, and setting up alerts. Keep responses clear and professional."""
+            loan inquiries, and setting up payment reminders. Keep responses clear and professional."""
         )
 
         # MCP client for calling banking tools
@@ -117,19 +117,47 @@ class Assistant(Agent):
                 name="banking_assistant",
                 model=model,
                 tools=mcp_tools,  # List of Function objects that call MCP server via HTTP with JWT
-                instructions="""You are a helpful and professional banking voice assistant.
+                instructions="""You are a helpful and professional banking voice assistant already aware of the user context.
 
 IMPORTANT: You MUST use the available tools to perform banking operations. Do not make up or guess information.
+
+CRITICAL FOR WRITE OPERATIONS (create_reminder, update_reminder, delete_reminder, make_payment):
+- These operations require multiple pieces of information
+- If the user doesn't provide all required information, ASK for it before calling the tool
+- For create_reminder, you need: scheduled_date (ISO 8601 string like "2025-12-20T10:00:00Z"), amount (number), recipient (string), and account_id (string)
+- For update_reminder, you need: reminder_id (string) and at least one field to update (scheduled_date, amount, recipient, description, account_id, or is_completed)
+- For delete_reminder, you need: reminder_id (string)
+- For make_payment, you need: to_account (string), amount (number), and optionally description (string)
+- If account_id is missing for create_reminder, first call get_balance to get available accounts, then ask the user which account to use
+- Collect ALL required information through conversation before calling the tool
+- Once you have all required information, call the tool with primitive values (strings, numbers), NOT objects
+
+CRITICAL: When calling tools, ALWAYS pass parameters as primitive values (strings, numbers, booleans), NOT as objects or dictionaries. For example:
+- scheduled_date should be a string like "2025-12-20T10:00:00Z", NOT {"date": "2025-12-20"}
+- amount should be a number like 50.0, NOT {"value": 50}
+- recipient should be a string like "mom", NOT {"name": "mom"}
 
 When a user asks about:
 - Account balances → Use the get_balance tool
 - Transaction history → Use the get_transactions tool
 - Loans → Use the get_loans tool
 - Credit limits → Use the get_credit_limit tool
-- Alerts → Use the get_alerts tool
 - Interest rates → Use the get_interest_rates tool
 - User profile/details → Use the get_user_details tool
-- Setting alerts → Use the set_alert tool
+- Making payments → Use the make_payment_with_elicitation tool (collect to_account, amount, description first)
+- Creating reminders → Use the create_reminder tool (collect scheduled_date, amount, recipient, account_id first)
+- Getting reminders → Use the get_reminders tool (optional filters: is_completed, scheduled_date_from, scheduled_date_to)
+- Updating reminders → Use the update_reminder tool (requires reminder_id and fields to update)
+- Deleting reminders → Use the delete_reminder tool (requires reminder_id)
+
+WORKFLOW FOR WRITE OPERATIONS:
+1. User expresses intent (e.g., "create a reminder", "update my reminder", "delete a reminder")
+2. Identify what information is missing
+3. Ask user for missing information one piece at a time
+4. If account_id is needed for create_reminder, call get_balance first to show available accounts
+5. If reminder_id is needed for update/delete, call get_reminders first to show available reminders
+6. Once ALL required information is collected, call the tool
+7. Confirm the operation was successful
 
 PAYMENT WORKFLOW (CRITICAL - FOLLOW THESE STEPS):
 When a user requests a payment/transfer (e.g., "Send $100 to John", "Pay Bob $50"):
@@ -172,7 +200,7 @@ Keep responses clear, professional, and based on actual tool responses.""",
                 add_session_state_to_context=True,
                 session_state={},  # Initialize empty state that will be persisted
             )
-            logger.info(f"Initialized Agno agent with Redis storage and session context for user_id: {self.user_id}, session_id: {self.session_id}")
+            logger.info(f"Initialized Agno agent with MCP server tools (auto-discovered) for user_id: {self.user_id}")
     
     async def llm_node(
         self, 
@@ -467,6 +495,8 @@ async def entrypoint(ctx: agents.JobContext):
     )
 
     # Generate initial greeting
+    # Note: llm_node will detect this is an initial greeting (no user message)
+    # and automatically inject user context by calling get_user_details
     await agent_session.generate_reply(
         instructions="Greet the user professionally as a banking assistant and ask how you can help with their banking needs today."
     )

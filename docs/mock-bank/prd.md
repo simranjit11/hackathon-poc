@@ -7,7 +7,8 @@
 - Enable comprehensive banking operations through RESTful API endpoints for development and testing
 - Provide mock banking data and operations that simulate real-world banking scenarios
 - Support voice assistant integration with reliable, predictable banking data responses
-- Enable payment processing, account management, and financial alerting capabilities
+- Enable payment processing with two-step OTP confirmation and account management
+- Enable reminder functionality for future scheduled payments
 - Create a foundation for testing banking workflows without external dependencies
 
 ### Background Context
@@ -16,7 +17,7 @@ The project currently has a voice assistant system that integrates with banking 
 
 1. **Development and Testing**: Developers need reliable mock APIs to test banking workflows without connecting to production banking systems
 2. **Voice Assistant Integration**: The voice agent requires structured, predictable responses from banking APIs to provide accurate information to users
-3. **Feature Completeness**: Current implementation has basic read operations, but needs payment processing, transfers, and alert management capabilities
+3. **Feature Completeness**: Current implementation has basic read operations, but needs payment processing and transfer capabilities
 
 The mock bank APIs will serve as a critical component in the development workflow, allowing teams to build and test banking features independently of external banking service dependencies. This is particularly important for the voice assistant use case, where natural language queries about accounts, balances, transactions, loans, and payments need to be supported with accurate, consistent data.
 
@@ -25,6 +26,7 @@ The mock bank APIs will serve as a critical component in the development workflo
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
 | 2025-01-XX | 1.0 | Initial PRD creation | PM Agent |
+| 2025-01-XX | 1.1 | Removed notifications and payment alerts, added payment reminders | PM Agent |
 
 ## Requirements
 
@@ -38,21 +40,19 @@ The mock bank APIs will serve as a critical component in the development workflo
 
 4. FR4: The system shall provide an API endpoint to retrieve transaction history with support for filtering by account type, date range, and pagination (limit/offset).
 
-5. FR5: The system shall provide an API endpoint to initiate payments between accounts, including validation of sufficient funds, account ownership, and transaction recording.
+5. FR5: The system shall provide an API endpoint to initiate payments (step 1), creating a pending transaction with OTP generation for confirmation. The endpoint shall support payments to beneficiaries (by ID or nickname), external accounts (by payment address), or internal transfers between user's own accounts.
 
-6. FR6: The system shall provide an API endpoint to initiate transfers between user's own accounts or to external beneficiaries, with support for immediate and scheduled transfers.
+6. FR6: The system shall provide an API endpoint to confirm payments (step 2) by validating the OTP code, completing the transaction, and updating account balances atomically. The endpoint shall support both internal transfers (updating both source and destination accounts) and external transfers (updating only source account).
 
-7. FR7: The system shall provide an API endpoint to create, read, update, and delete payment alerts for authenticated users, including alert types (payment received, payment sent, low balance, etc.).
+7. FR7: The system shall provide an API endpoint to create, read, update, and delete reminders for future payments, including scheduled payment date, amount, recipient, and reminder notification settings.
 
-8. FR8: The system shall provide an API endpoint to create, read, update, and delete notification preferences for authenticated users, including notification channels (email, SMS, push) and event types.
+8. FR8: The system shall validate all API requests for proper authentication and authorization, ensuring users can only access their own account data.
 
-9. FR9: The system shall validate all API requests for proper authentication and authorization, ensuring users can only access their own account data.
+9. FR9: The system shall return consistent, structured JSON responses for all API endpoints with appropriate HTTP status codes and error messages.
 
-10. FR10: The system shall return consistent, structured JSON responses for all API endpoints with appropriate HTTP status codes and error messages.
+10. FR10: The system shall maintain transaction history for all payments and transfers, including transaction ID, timestamp, amount, from/to accounts, and status.
 
-11. FR11: The system shall maintain transaction history for all payments and transfers, including transaction ID, timestamp, amount, from/to accounts, and status.
-
-12. FR12: The system shall support mock data persistence across API calls within a session or configured time period to simulate realistic banking behavior.
+11. FR11: The system shall support mock data persistence across API calls within a session or configured time period to simulate realistic banking behavior.
 
 ### Non Functional
 
@@ -66,7 +66,7 @@ The mock bank APIs will serve as a critical component in the development workflo
 
 5. NFR5: The API shall support JSON request and response formats with proper content-type headers.
 
-6. NFR6: The system shall be designed to be easily extensible for adding new account types, transaction types, or alert types without major refactoring.
+6. NFR6: The system shall be designed to be easily extensible for adding new account types or transaction types without major refactoring.
 
 7. NFR7: The mock data shall be configurable and seedable to support different testing scenarios and use cases.
 
@@ -103,16 +103,12 @@ The project uses a monorepo structure with the Next.js server located in `agent-
 - `GET /api/banking/accounts/balance` - Retrieve account balance(s)
 - `GET /api/banking/loans` - Retrieve loan information
 - `GET /api/banking/transactions` - Retrieve transaction history
-- `POST /api/banking/payments` - Initiate payments
-- `POST /api/banking/transfers` - Initiate transfers
-- `GET /api/banking/alerts` - Retrieve payment alerts
-- `POST /api/banking/alerts` - Create payment alert
-- `PUT /api/banking/alerts/[id]` - Update payment alert
-- `DELETE /api/banking/alerts/[id]` - Delete payment alert
-- `GET /api/banking/notifications` - Retrieve notification preferences
-- `POST /api/banking/notifications` - Create notification preference
-- `PUT /api/banking/notifications/[id]` - Update notification preference
-- `DELETE /api/banking/notifications/[id]` - Delete notification preference
+- `POST /api/banking/payments/initiate` - Initiate payments (creates pending transaction with OTP)
+- `POST /api/banking/payments/confirm` - Confirm payments with OTP
+- `GET /api/banking/reminders` - Retrieve payment reminders
+- `POST /api/banking/reminders` - Create payment reminder
+- `PUT /api/banking/reminders/[id]` - Update payment reminder
+- `DELETE /api/banking/reminders/[id]` - Delete payment reminder
 
 ### Testing Requirements
 
@@ -128,12 +124,11 @@ The project uses a monorepo structure with the Next.js server located in `agent-
    - `Account` - User banking accounts (checking, savings, credit card)
    - `Loan` - User loan information
    - `Transaction` - Payment and transfer transaction history
-   - `PaymentAlert` - User-configured payment alerts
-   - `NotificationPreference` - User notification channel preferences
+   - `PaymentReminder` - Reminders for future scheduled payments
 
 2. **Authentication**: All banking API endpoints will require valid JWT token in Authorization header, following the existing pattern used in `/api/beneficiaries` and `/api/auth/me`.
 
-3. **Data Persistence**: Use PostgreSQL database (via Prisma) for persistent storage of accounts, transactions, loans, alerts, and notifications. Mock data can be seeded via Prisma seed script.
+3. **Data Persistence**: Use PostgreSQL database (via Prisma) for persistent storage of accounts, transactions, loans, and payment reminders. Mock data can be seeded via Prisma seed script.
 
 4. **Error Handling**: Follow existing error handling patterns with consistent JSON error responses and appropriate HTTP status codes.
 
@@ -145,14 +140,14 @@ The project uses a monorepo structure with the Next.js server located in `agent-
 
 ## Epic List
 
-1. **Epic 1: Database Schema and Foundation**: Establish Prisma database schema for banking entities (accounts, loans, transactions, alerts, notifications) and create seed data for development/testing.
+1. **Epic 1: Database Schema and Foundation**: Establish Prisma database schema for banking entities (accounts, loans, transactions, payment reminders) and create seed data for development/testing.
 
 2. **Epic 2: Account and Balance Read Operations**: Implement API endpoints for retrieving account details and account balances with proper authentication and authorization.
 
 3. **Epic 3: Loans and Transactions Read Operations**: Implement API endpoints for retrieving loan information and transaction history with filtering and pagination support.
 
-4. **Epic 4: Payment and Transfer Operations**: Implement API endpoints for initiating payments and transfers with validation, balance checks, and transaction recording.
+4. **Epic 4: Payment and Transfer Operations**: Implement API endpoints for initiating payments (with OTP) and confirming payments (with OTP validation), including validation, balance checks, and transaction recording.
 
-5. **Epic 5: Alerts and Notifications Management**: Implement CRUD API endpoints for payment alerts and notification preferences with support for multiple alert types and notification channels.
+5. **Epic 5: Payment Reminders Management**: Implement CRUD API endpoints for payment reminders (for future scheduled payments).
 
 

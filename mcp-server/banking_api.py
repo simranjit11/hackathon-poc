@@ -69,6 +69,14 @@ class BankingAPI:
         """Make POST request with JWT token."""
         headers = {"Authorization": f"Bearer {jwt_token}"}
         response = await self.client.post(endpoint, headers=headers, json=data)
+        if not response.is_success:
+            # Log error response body for debugging
+            try:
+                error_body = response.json()
+                logger.error(f"API error response: {error_body}")
+            except Exception:
+                error_text = response.text
+                logger.error(f"API error response (non-JSON): {error_text}")
         response.raise_for_status()
         return response.json()
     
@@ -114,6 +122,7 @@ class BankingAPI:
             transformed = []
             for account in accounts:
                 transformed.append({
+                    "id": account.get("id", ""),  # Include account ID
                     "type": account.get("accountType", ""),
                     "account_number": account.get("accountNumber", ""),
                     "balance": float(account.get("balance", 0)),
@@ -457,102 +466,274 @@ class BankingAPI:
             logger.warning(f"Failed to fetch user details from backend API: {e}")
             return None
     
-    async def set_alert(
+    async def create_reminder(
         self,
         user_id: str,
-        alert_type: str,
-        description: str,
-        due_date: Optional[str] = None,
+        scheduled_date: str,
+        amount: float,
+        recipient: str,
+        description: str = "",
+        beneficiary_id: Optional[str] = None,
+        beneficiary_nickname: Optional[str] = None,
+        account_id: Optional[str] = None,
+        reminder_notification_settings: Optional[Dict[str, Any]] = None,
         jwt_token: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Set up a payment reminder or alert.
+        Create a payment reminder.
         
         Args:
             user_id: User identifier
-            alert_type: Type of alert ('payment', 'low_balance', 'large_transaction')
-            description: Description of the alert
-            due_date: Optional due date for payment reminders
+            scheduled_date: ISO 8601 date string for scheduled payment
+            amount: Payment amount
+            recipient: Recipient name or payment address
+            description: Description of the reminder
+            beneficiary_id: Optional beneficiary ID
+            beneficiary_nickname: Optional beneficiary nickname
+            account_id: Account ID for payment (required)
+            reminder_notification_settings: Optional notification settings
             jwt_token: JWT token for authentication
             
         Returns:
-            Alert dictionary
+            Reminder dictionary
         """
         if not jwt_token:
-            raise ValueError("JWT token required for setting alerts")
+            raise ValueError("JWT token required for creating reminders")
         
-        # Map alert types to API format
-        alert_type_map = {
-            "payment": "payment_received",
-            "low_balance": "low_balance",
-            "large_transaction": "payment_sent",
-        }
-        api_alert_type = alert_type_map.get(alert_type, "payment_received")
+        if not account_id:
+            raise ValueError("account_id is required")
         
         try:
+            payload = {
+                "scheduledDate": scheduled_date,
+                "amount": amount,
+                "recipient": recipient,
+                "accountId": account_id,
+            }
+            
+            # Only include optional fields if they have non-empty values
+            # Don't send empty strings - they might cause validation issues
+            if description and description.strip():
+                payload["description"] = description.strip()
+            
+            # Only include beneficiary fields if they have values
+            # Note: beneficiary_id and beneficiary_nickname are mutually exclusive
+            if beneficiary_id and beneficiary_id.strip():
+                payload["beneficiaryId"] = beneficiary_id.strip()
+            elif beneficiary_nickname and beneficiary_nickname.strip():
+                payload["beneficiaryNickname"] = beneficiary_nickname.strip()
+            
+            if reminder_notification_settings:
+                payload["reminderNotificationSettings"] = reminder_notification_settings
+            
+            logger.info(f"Creating reminder with payload keys: {list(payload.keys())}")
+            logger.debug(f"Creating reminder with payload: {payload}")
+            
             result = await self._post_with_token(
-                "/api/banking/alerts",
+                "/api/banking/reminders",
                 jwt_token,
-                {
-                    "alertType": api_alert_type,
-                    "description": description,
-                }
+                payload
             )
             
-            alert_data = result.get("data", {})
+            reminder_data = result.get("data", {})
             return {
-                "type": alert_data.get("alertType", "").replace("_", " ").title() + " Alert",
-                "description": description + (f" (Due: {due_date})" if due_date else ""),
-                "active": alert_data.get("isActive", True),
-                "created_at": alert_data.get("createdAt", datetime.now().isoformat()),
+                "id": reminder_data.get("id", ""),
+                "scheduledDate": reminder_data.get("scheduledDate", scheduled_date),
+                "amount": reminder_data.get("amount", amount),
+                "recipient": reminder_data.get("recipient", recipient),
+                "description": reminder_data.get("description", description),
+                "isCompleted": reminder_data.get("isCompleted", False),
+                "created_at": reminder_data.get("createdAt", datetime.now().isoformat()),
             }
+        except httpx.HTTPStatusError as e:
+            # Extract error message from response
+            error_msg = f"Failed to create reminder: {e.response.status_code}"
+            try:
+                error_body = e.response.json()
+                if "error" in error_body:
+                    error_msg = f"Failed to create reminder: {error_body['error']}"
+                logger.error(f"API error: {error_msg}, response: {error_body}")
+            except Exception:
+                error_text = e.response.text
+                logger.error(f"API error: {error_msg}, response text: {error_text[:200]}")
+            raise ValueError(error_msg)
         except httpx.HTTPError as e:
-            logger.error(f"Failed to create alert: {e}")
-            # Fallback to in-memory storage for backward compatibility
-            return {
-                "type": alert_type.replace('_', ' ').title() + " Alert",
-                "description": description + (f" (Due: {due_date})" if due_date else ""),
-                "active": True,
-                "created_at": datetime.now().isoformat()
-            }
+            logger.error(f"Failed to create reminder: {e}")
+            raise ValueError(f"Failed to create reminder: {e}")
     
-    async def get_alerts(
+    async def get_reminders(
         self,
         user_id: str,
+        is_completed: Optional[bool] = None,
+        scheduled_date_from: Optional[str] = None,
+        scheduled_date_to: Optional[str] = None,
         jwt_token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get all alerts for a user.
+        Get all payment reminders for a user.
         
         Args:
             user_id: User identifier
+            is_completed: Optional filter by completion status
+            scheduled_date_from: Optional filter by scheduled date from (ISO 8601)
+            scheduled_date_to: Optional filter by scheduled date to (ISO 8601)
             jwt_token: JWT token for authentication
             
         Returns:
-            List of alert dictionaries
+            List of reminder dictionaries
         """
         if not jwt_token:
             # Return empty list if no token
             return []
         
         try:
-            result = await self._get_with_token("/api/banking/alerts", jwt_token)
-            alerts = result.get("data", [])
+            params = {}
+            if is_completed is not None:
+                params["isCompleted"] = str(is_completed).lower()
+            if scheduled_date_from:
+                params["scheduledDateFrom"] = scheduled_date_from
+            if scheduled_date_to:
+                params["scheduledDateTo"] = scheduled_date_to
+            
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            url = f"/api/banking/reminders?{query_string}" if query_string else "/api/banking/reminders"
+            
+            result = await self._get_with_token(url, jwt_token)
+            reminders = result.get("data", [])
             
             # Transform to match expected format
             transformed = []
-            for alert in alerts:
+            for reminder in reminders:
                 transformed.append({
-                    "type": alert.get("alertType", "").replace("_", " ").title() + " Alert",
-                    "description": f"Threshold: ${alert.get('threshold', 0)}" if alert.get("threshold") else "Alert active",
-                    "active": alert.get("isActive", True),
-                    "created_at": alert.get("createdAt", ""),
+                    "id": reminder.get("id", ""),
+                    "scheduledDate": reminder.get("scheduledDate", ""),
+                    "amount": reminder.get("amount", 0),
+                    "recipient": reminder.get("recipient", ""),
+                    "description": reminder.get("description", ""),
+                    "isCompleted": reminder.get("isCompleted", False),
+                    "created_at": reminder.get("createdAt", ""),
                 })
             
             return transformed
         except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch alerts: {e}")
+            logger.error(f"Failed to fetch reminders: {e}")
             return []
+    
+    async def update_reminder(
+        self,
+        user_id: str,
+        reminder_id: str,
+        scheduled_date: Optional[str] = None,
+        amount: Optional[float] = None,
+        recipient: Optional[str] = None,
+        description: Optional[str] = None,
+        beneficiary_id: Optional[str] = None,
+        beneficiary_nickname: Optional[str] = None,
+        account_id: Optional[str] = None,
+        is_completed: Optional[bool] = None,
+        reminder_notification_settings: Optional[Dict[str, Any]] = None,
+        jwt_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update a payment reminder.
+        
+        Args:
+            user_id: User identifier
+            reminder_id: Reminder ID to update
+            scheduled_date: Optional ISO 8601 date string for scheduled payment
+            amount: Optional payment amount
+            recipient: Optional recipient name or payment address
+            description: Optional description of the reminder
+            beneficiary_id: Optional beneficiary ID
+            beneficiary_nickname: Optional beneficiary nickname
+            account_id: Optional account ID for payment
+            is_completed: Optional completion status
+            reminder_notification_settings: Optional notification settings
+            jwt_token: JWT token for authentication
+            
+        Returns:
+            Updated reminder dictionary
+        """
+        if not jwt_token:
+            raise ValueError("JWT token required for updating reminders")
+        
+        try:
+            payload: Dict[str, Any] = {}
+            
+            if scheduled_date is not None:
+                payload["scheduledDate"] = scheduled_date
+            if amount is not None:
+                payload["amount"] = amount
+            if recipient is not None:
+                payload["recipient"] = recipient
+            if description is not None:
+                payload["description"] = description
+            if beneficiary_id is not None:
+                payload["beneficiaryId"] = beneficiary_id
+            if beneficiary_nickname is not None:
+                payload["beneficiaryNickname"] = beneficiary_nickname
+            if account_id is not None:
+                payload["accountId"] = account_id
+            if is_completed is not None:
+                payload["isCompleted"] = is_completed
+            if reminder_notification_settings is not None:
+                payload["reminderNotificationSettings"] = reminder_notification_settings
+            
+            # Use PUT method
+            headers = {"Authorization": f"Bearer {jwt_token}"}
+            response = await self.client.put(
+                f"/api/banking/reminders/{reminder_id}",
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            reminder_data = result.get("data", {})
+            return {
+                "id": reminder_data.get("id", reminder_id),
+                "scheduledDate": reminder_data.get("scheduledDate", scheduled_date),
+                "amount": reminder_data.get("amount", amount),
+                "recipient": reminder_data.get("recipient", recipient),
+                "description": reminder_data.get("description", description),
+                "isCompleted": reminder_data.get("isCompleted", is_completed),
+                "updated_at": reminder_data.get("updatedAt", datetime.now().isoformat()),
+            }
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to update reminder: {e}")
+            raise ValueError(f"Failed to update reminder: {e}")
+    
+    async def delete_reminder(
+        self,
+        user_id: str,
+        reminder_id: str,
+        jwt_token: Optional[str] = None
+    ) -> bool:
+        """
+        Delete a payment reminder.
+        
+        Args:
+            user_id: User identifier
+            reminder_id: Reminder ID to delete
+            jwt_token: JWT token for authentication
+            
+        Returns:
+            True if successful
+        """
+        if not jwt_token:
+            raise ValueError("JWT token required for deleting reminders")
+        
+        try:
+            headers = {"Authorization": f"Bearer {jwt_token}"}
+            response = await self.client.delete(
+                f"/api/banking/reminders/{reminder_id}",
+                headers=headers
+            )
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to delete reminder: {e}")
+            raise ValueError(f"Failed to delete reminder: {e}")
     
     async def close(self):
         """Close HTTP client."""

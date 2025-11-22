@@ -128,9 +128,15 @@ class MCPClient:
         # Build tool arguments
         # Include jwt_token in arguments for tools that require it as a parameter
         # Also send in headers for tools that read from headers
+        # Filter out None values and empty strings to avoid FastMCP validation errors
+        filtered_kwargs = {
+            k: v for k, v in kwargs.items()
+            if v is not None and v != "" and not (isinstance(v, dict) and len(v) == 0)
+        }
+        
         tool_arguments = {
             "jwt_token": jwt_token,
-            **kwargs
+            **filtered_kwargs
         }
         
         # FastMCP uses JSON-RPC 2.0 protocol
