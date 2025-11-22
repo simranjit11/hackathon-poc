@@ -1,6 +1,6 @@
 # Mock Bank APIs Architecture Document
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Last Updated:** 2025-01-XX  
 **Status:** Architecture Specification  
 **Related PRD:** [Mock Bank APIs PRD](./prd.md)
@@ -32,8 +32,8 @@ The Mock Bank APIs provide comprehensive banking operation endpoints within the 
 - Account and balance inquiries
 - Loan information retrieval
 - Transaction history with filtering
-- Payment and transfer processing
-- Alert and notification management
+- Payment and transfer processing with two-step OTP confirmation
+- Payment reminders for future scheduled payments
 
 ### Integration with Existing System
 
@@ -62,10 +62,9 @@ The Mock Bank APIs are integrated as **Next.js API Routes** within the existing 
 │  │  /api/banking/accounts                              │   │
 │  │  /api/banking/loans                                 │   │
 │  │  /api/banking/transactions                          │   │
-│  │  /api/banking/payments                              │   │
-│  │  /api/banking/transfers                             │   │
-│  │  /api/banking/alerts                                │   │
-│  │  /api/banking/notifications                         │   │
+│  │  /api/banking/payments/initiate                     │   │
+│  │  /api/banking/payments/confirm                      │   │
+│  │  /api/banking/reminders                             │   │
 │  └────────────────────────────────────────────────────┘   │
 │                          │                                  │
 │                          ▼                                  │
@@ -84,8 +83,7 @@ The Mock Bank APIs are integrated as **Next.js API Routes** within the existing 
 │  │  - accounts (new)                                    │   │
 │  │  - loans (new)                                       │   │
 │  │  - transactions (new)                                │   │
-│  │  - payment_alerts (new)                             │   │
-│  │  - notification_preferences (new)                   │   │
+│  │  - payment_reminders (new)                           │   │
 │  └────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                           │
@@ -172,8 +170,7 @@ Organized by domain:
 - `lib/banking/payments.ts` - Unified payment processing (initiation and confirmation)
 - `lib/banking/payment-otp.ts` - OTP generation and validation for payments
 - `lib/banking/beneficiaries.ts` - Beneficiary resolution and lookup
-- `lib/banking/alerts.ts` - Alert management
-- `lib/banking/notifications.ts` - Notification preferences
+- `lib/banking/reminders.ts` - Payment reminder management
 
 **Purpose**: Separate business logic from route handlers for testability and reusability.
 
@@ -260,9 +257,10 @@ model Account {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
-  loans        Loan[]
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  loans           Loan[]
+  paymentReminders PaymentReminder[]
 
   @@index([userId])
   @@index([accountType])
@@ -324,39 +322,30 @@ model Transaction {
   @@map("transactions")
 }
 
-model PaymentAlert {
+model PaymentReminder {
   id            String   @id @default(uuid())
   userId        String   @map("user_id")
-  alertType     String   @map("alert_type") // "payment_received" | "payment_sent" | "low_balance" | "high_balance"
-  threshold     Decimal? @db.Decimal(15, 2) // For balance-based alerts
-  accountId     String?  @map("account_id") // Optional: specific account
-  isActive      Boolean  @default(true) @map("is_active")
+  scheduledDate DateTime @map("scheduled_date") // When payment should be made
+  amount        Decimal  @db.Decimal(15, 2)
+  recipient     String   // Recipient name or payment address
+  description   String?
+  beneficiaryId String?  @map("beneficiary_id") // Optional: link to beneficiary
+  accountId     String   @map("account_id") // Source account for payment
+  isCompleted   Boolean  @default(false) @map("is_completed")
+  reminderNotificationSettings Json? @map("reminder_notification_settings") // JSON: { email: true, sms: false, push: true }
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  beneficiary Beneficiary? @relation(fields: [beneficiaryId], references: [id], onDelete: SetNull)
 
   @@index([userId])
-  @@index([alertType])
-  @@index([isActive])
-  @@map("payment_alerts")
-}
-
-model NotificationPreference {
-  id            String   @id @default(uuid())
-  userId        String   @map("user_id")
-  channel       String   // "email" | "sms" | "push"
-  eventType     String   @map("event_type") // "payment" | "alert" | "balance" | "transaction"
-  isEnabled     Boolean  @default(true) @map("is_enabled")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, channel, eventType])
-  @@index([userId])
-  @@index([isEnabled])
-  @@map("notification_preferences")
+  @@index([accountId])
+  @@index([beneficiaryId])
+  @@index([scheduledDate])
+  @@index([isCompleted])
+  @@map("payment_reminders")
 }
 ```
 
@@ -367,7 +356,8 @@ The `Beneficiary` model already exists in the schema. Add the transaction relati
 ```prisma
 model Beneficiary {
   // ... existing fields ...
-  transactions Transaction[] // Transactions sent to this beneficiary
+  transactions      Transaction[]      // Transactions sent to this beneficiary
+  paymentReminders   PaymentReminder[]  // Payment reminders for this beneficiary
 }
 ```
 
@@ -382,8 +372,7 @@ model User {
   accounts      Account[]
   loans         Loan[]
   transactions  Transaction[]
-  paymentAlerts PaymentAlert[]
-  notificationPreferences NotificationPreference[]
+  paymentReminders PaymentReminder[]
 }
 ```
 
@@ -601,54 +590,55 @@ All endpoints under `/api/banking/` namespace:
 - Insufficient balance (re-check): Returns 400 with "Insufficient funds"
 - Transaction not found: Returns 404 with "Payment session not found"
 
-#### Alert Endpoints
+#### Payment Reminder Endpoints
 
-**GET /api/banking/alerts**
-- Retrieve all payment alerts for authenticated user
-- Response: Array of alert objects
+**GET /api/banking/reminders**
+- Retrieve all payment reminders for authenticated user
+- Query params:
+  - `isCompleted` (optional): Filter by completion status (true/false)
+  - `scheduledDateFrom` (optional): Filter reminders scheduled from this date (ISO 8601)
+  - `scheduledDateTo` (optional): Filter reminders scheduled until this date (ISO 8601)
+- Response: Array of payment reminder objects
 
-**POST /api/banking/alerts**
+**POST /api/banking/reminders**
 - Request body:
   ```json
   {
-    "alertType": "low_balance",
-    "threshold": 100.00,
-    "accountId": "uuid" // Optional
+    "scheduledDate": "2025-02-15T10:00:00Z", // ISO 8601 date
+    "amount": 100.00,
+    "recipient": "Mom", // Recipient name or payment address
+    "description": "Monthly rent payment",
+    "beneficiaryId": "uuid", // Optional: link to beneficiary
+    "beneficiaryNickname": "Mom", // Optional: alternative to beneficiaryId
+    "accountId": "uuid", // Source account for payment
+    "reminderNotificationSettings": { // Optional
+      "email": true,
+      "sms": false,
+      "push": true
+    }
   }
   ```
-- Response: Created alert object
+- **Business Logic**:
+  - If `beneficiaryId` or `beneficiaryNickname` provided, resolves beneficiary and links reminder
+  - Validates `scheduledDate` is in the future
+  - Validates `accountId` belongs to authenticated user
+  - Validates `amount` is positive
+- Response: Created payment reminder object
 
-**PUT /api/banking/alerts/[id]**
-- Update existing alert
-- Response: Updated alert object
+**PUT /api/banking/reminders/[id]**
+- Update existing payment reminder
+- Request body: Same as POST (all fields optional)
+- **Business Logic**:
+  - Validates reminder belongs to authenticated user
+  - If updating `scheduledDate`, validates it's still in the future
+  - If reminder is already completed, prevents modification of key fields
+- Response: Updated payment reminder object
 
-**DELETE /api/banking/alerts/[id]**
-- Delete alert
-- Response: 204 No Content
-
-#### Notification Endpoints
-
-**GET /api/banking/notifications**
-- Retrieve all notification preferences for authenticated user
-- Response: Array of notification preference objects
-
-**POST /api/banking/notifications**
-- Request body:
-  ```json
-  {
-    "channel": "email",
-    "eventType": "payment",
-    "isEnabled": true
-  }
-  ```
-- Response: Created notification preference object
-
-**PUT /api/banking/notifications/[id]**
-- Update notification preference
-- Response: Updated notification preference object
-
-**DELETE /api/banking/notifications/[id]**
-- Delete notification preference
+**DELETE /api/banking/reminders/[id]**
+- Delete payment reminder
+- **Business Logic**:
+  - Validates reminder belongs to authenticated user
+  - Allows deletion of completed reminders
 - Response: 204 No Content
 
 ### Response Format
@@ -898,7 +888,7 @@ All banking endpoints require JWT authentication:
 **Permission Checks** (if needed):
 - `read` permission: Required for GET endpoints
 - `transact` permission: Required for POST /payments
-- `configure` permission: Required for POST/PUT/DELETE on alerts and notifications
+- `configure` permission: Required for POST/PUT/DELETE on reminders
 
 ### MCP Server Integration
 
@@ -1132,6 +1122,15 @@ return corsResponse(
 - `limit` must be between 1 and 100
 - `offset` must be non-negative
 
+**Payment Reminder Validation**:
+- `scheduledDate` must be in the future
+- `amount` must be positive
+- `accountId` must belong to authenticated user
+- `beneficiaryId` (if provided) must belong to authenticated user
+- `beneficiaryNickname` (if provided) must exist and belong to authenticated user
+- `reminderNotificationSettings` (if provided) must be valid JSON object with optional `email`, `sms`, `push` boolean fields
+- Reminder cannot be modified if already completed (except deletion)
+
 ---
 
 ## Source Tree Organization
@@ -1157,14 +1156,10 @@ agent-starter-react/
 │           │   │   └── route.ts      # POST /api/banking/payments/initiate
 │           │   └── confirm/
 │           │       └── route.ts       # POST /api/banking/payments/confirm
-│           ├── alerts/
-│           │   ├── route.ts           # GET, POST /api/banking/alerts
-│           │   └── [id]/
-│           │       └── route.ts        # PUT, DELETE /api/banking/alerts/[id]
-│           └── notifications/
-│               ├── route.ts            # GET, POST /api/banking/notifications
+│           └── reminders/
+│               ├── route.ts            # GET, POST /api/banking/reminders
 │               └── [id]/
-│                   └── route.ts        # PUT, DELETE /api/banking/notifications/[id]
+│                   └── route.ts        # PUT, DELETE /api/banking/reminders/[id]
 │       └── internal/                 # EXISTING: Internal API routes
 │           └── banking/               # NEW: Internal banking endpoints
 │               ├── accounts/
@@ -1183,10 +1178,8 @@ agent-starter-react/
 │       ├── loans.ts
 │       ├── transactions.ts
 │       ├── payments.ts
-│       ├── transfers.ts
 │       ├── beneficiaries.ts           # Beneficiary resolution and lookup
-│       ├── alerts.ts
-│       ├── notifications.ts
+│       ├── reminders.ts               # Payment reminder management
 │       └── validators.ts
 └── prisma/
     ├── schema.prisma                  # MODIFIED: Add banking models

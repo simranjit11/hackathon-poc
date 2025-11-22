@@ -24,7 +24,7 @@ model User {
   accounts                Account[]
   loans                   Loan[]
   transactions            Transaction[]
-  paymentAlerts           PaymentAlert[]
+  paymentReminders        PaymentReminder[]
   notificationPreferences NotificationPreference[]
 
   @@index([email])
@@ -43,8 +43,9 @@ model Beneficiary {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions     Transaction[]
+  paymentReminders PaymentReminder[]
 
   @@unique([userId, nickname]) // Prevent duplicate nicknames for same user
   @@map("beneficiaries")
@@ -62,9 +63,10 @@ model Account {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
-  loans        Loan[]
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions     Transaction[]
+  loans            Loan[]
+  paymentReminders PaymentReminder[]
 
   @@index([userId])
   @@index([accountType])
@@ -126,22 +128,30 @@ model Transaction {
   @@map("transactions")
 }
 
-model PaymentAlert {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  alertType String   @map("alert_type") // "payment_received" | "payment_sent" | "low_balance" | "high_balance"
-  threshold Decimal? @db.Decimal(15, 2) // For balance-based alerts
-  accountId String?  @map("account_id") // Optional: specific account
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+model PaymentReminder {
+  id                          String   @id @default(uuid())
+  userId                      String   @map("user_id")
+  scheduledDate               DateTime @map("scheduled_date")
+  amount                      Decimal  @db.Decimal(15, 2)
+  recipient                   String
+  description                 String?
+  beneficiaryId               String?  @map("beneficiary_id")
+  accountId                   String   @map("account_id")
+  isCompleted                 Boolean  @default(false) @map("is_completed")
+  reminderNotificationSettings Json?   @map("reminder_notification_settings")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  beneficiary Beneficiary? @relation(fields: [beneficiaryId], references: [id], onDelete: SetNull)
 
   @@index([userId])
-  @@index([alertType])
-  @@index([isActive])
-  @@map("payment_alerts")
+  @@index([accountId])
+  @@index([beneficiaryId])
+  @@index([scheduledDate])
+  @@index([isCompleted])
+  @@map("payment_reminders")
 }
 
 model NotificationPreference {

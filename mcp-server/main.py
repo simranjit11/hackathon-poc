@@ -169,11 +169,13 @@ async def get_balance(
         # Build response with masking
         balances = []
         for balance_data in balances_data:
-            acc_type = balance_data.get("account_type", "unknown")
+            acc_id = balance_data.get("id", "")  # Account ID (not masked, needed for operations)
+            acc_type = balance_data.get("type", "unknown")  # get_account_balances returns "type" from get_accounts
             acc_number = balance_data.get("account_number", "")
             balance = balance_data.get("balance", 0.0)
             
             response = {
+                "account_id": acc_id,  # Include account ID for use in create_reminder
                 "account_type": acc_type,
                 "account_number": mask_account_number(acc_number),
                 "balance": balance,
@@ -182,9 +184,9 @@ async def get_balance(
             
             # Add credit card specific fields
             if acc_type == "credit_card":
-                credit_limit = balance_data.get("credit_limit", 0.0)
+                credit_limit = balance_data.get("limit", 0.0)
                 response["credit_limit"] = credit_limit
-                response["available_credit"] = balance_data.get("available_balance", credit_limit - balance)
+                response["available_credit"] = credit_limit - balance if credit_limit else 0.0
             
             balances.append(response)
         
@@ -358,28 +360,24 @@ async def get_loans(jwt_token: str) -> List[dict]:
 @mcp.tool()
 async def initiate_payment(
     jwt_token: str,
+    from_account: str,
     to_account: str,
     amount: float,
-    from_account: Optional[str] = None,
     description: str = "",
     tool_call_id: str = "",
     platform: str = "web"
 ) -> dict:
     """
-    Initiate a payment or transfer with elicitation (OTP/confirmation required).
+    Initiate a payment or transfer between accounts with elicitation.
     
     This tool initiates a payment and returns an elicitation request for OTP/confirmation.
     The payment will be completed after the user provides the required confirmation.
     
-    If from_account is not specified, automatically uses the primary account with sufficient balance.
-    Priority: checking > savings > credit_card
-    
     Args:
         jwt_token: JWT authentication token with 'transact' scope
+        from_account: Source account type ('checking', 'savings')
         to_account: Destination account or payee name (beneficiary nickname or account number)
         amount: Amount to transfer
-        from_account: Optional source account type ('checking', 'savings', 'credit_card'). 
-                     If not provided, automatically selects account with sufficient balance.
         description: Optional description for the transaction
         tool_call_id: Tool call ID for tracking (optional)
         platform: Platform type (web/mobile) for elicitation requirements
@@ -392,41 +390,6 @@ async def initiate_payment(
     try:
         # Authenticate user with transact scope
         user = get_user_from_token(jwt_token, required_scope="transact")
-        
-        # Auto-select source account if not provided
-        if not from_account:
-            banking_api = BankingAPI()
-            accounts = await banking_api.get_account_balances(
-                user.user_id,
-                jwt_token=jwt_token
-            )
-            
-            # Priority: checking > savings > credit_card
-            # Select first available account (balance check disabled for testing)
-            account_priority = ["checking", "savings", "credit_card"]
-            selected_account = None
-            
-            for acc_type in account_priority:
-                for account in accounts:
-                    if account.get("account_type") == acc_type:
-                        selected_account = acc_type
-                        logger.info(f"Auto-selected {acc_type} account")
-                        break
-                if selected_account:
-                    break
-            
-            if not selected_account:
-                # If no accounts found with priority types, use any account
-                if accounts:
-                    selected_account = accounts[0].get("account_type", "savings")
-                    logger.info(f"Auto-selected first available account: {selected_account}")
-                else:
-                    raise ValueError(
-                        f"No accounts found for user. Please create an account first."
-                    )
-            
-            from_account = selected_account
-        
         logger.info(
             f"Payment initiation for user_id: {user.user_id}, "
             f"from: {from_account}, to: {to_account}, amount: {amount}"
@@ -536,41 +499,57 @@ async def get_credit_limit(jwt_token: str) -> dict:
 
 
 @mcp.tool()
-async def set_alert(
+async def create_reminder(
     jwt_token: str,
-    alert_type: str,
-    description: str,
-    due_date: str = ""
+    scheduled_date: str,
+    amount: float,
+    recipient: str,
+    account_id: str,
+    description: str = "",
+    beneficiary_id: str = "",
+    beneficiary_nickname: str = ""
 ) -> dict:
     """
-    Set up payment reminders or alerts.
+    Create a payment reminder for a future scheduled payment.
     
     Args:
         jwt_token: JWT authentication token with 'configure' scope
-        alert_type: Type of alert ('payment', 'low_balance', 'large_transaction')
-        description: Description of the alert
-        due_date: Optional due date for payment reminders (YYYY-MM-DD)
+        scheduled_date: ISO 8601 date string for scheduled payment (e.g., "2025-02-15T10:00:00Z")
+        amount: Payment amount
+        recipient: Recipient name or payment address
+        account_id: Account ID for payment (required)
+        description: Optional description of the reminder
+        beneficiary_id: Optional beneficiary ID to link reminder
+        beneficiary_nickname: Optional beneficiary nickname to link reminder
         
     Returns:
-        Alert confirmation
+        Reminder confirmation with details
     """
-    logger.info("Set alert request received")
+    logger.info("Create reminder request received")
     
     try:
         # Authenticate user with configure scope
         user = get_user_from_token(jwt_token, required_scope="configure")
         logger.info(
-            f"Set alert request for user_id: {user.user_id}, "
-            f"type: {alert_type}"
+            f"Create reminder request for user_id: {user.user_id}, "
+            f"recipient: {recipient}, amount: {amount}"
         )
+        
+        if not account_id:
+            raise ValueError("account_id is required")
         
         # Query banking API with JWT token
         banking_api = BankingAPI()
-        alert = await banking_api.set_alert(
+        reminder = await banking_api.create_reminder(
             user.user_id,
-            alert_type,
+            scheduled_date,
+            amount,
+            recipient,
             description,
-            due_date if due_date else None,
+            beneficiary_id if beneficiary_id else None,
+            beneficiary_nickname if beneficiary_nickname else None,
+            account_id,
+            None,  # reminder_notification_settings
             jwt_token=jwt_token
         )
         
@@ -579,64 +558,91 @@ async def set_alert(
         result = {
             "success": True,
             "customer_name": customer_name,
-            "alert": alert,
-            "message": f"Reminder set successfully for {customer_name}!"
+            "reminder": reminder,
+            "message": f"Payment reminder created successfully for {customer_name}!"
         }
         
-        logger.info(f"Alert set for user_id: {user.user_id}, type: {alert_type}")
+        logger.info(f"Reminder created for user_id: {user.user_id}, scheduled_date: {scheduled_date}")
         
         return result
         
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error creating reminder: {e}")
+        raise ValueError(f"Failed to create reminder: {str(e)}")
 
 
 @mcp.tool()
-async def get_alerts(jwt_token: str) -> List[dict]:
+async def get_reminders(
+    jwt_token: str,
+    is_completed: str = "",
+    scheduled_date_from: str = "",
+    scheduled_date_to: str = ""
+) -> List[dict]:
     """
-    Get active payment alerts and reminders for the authenticated user.
+    Get payment reminders for the authenticated user.
     
     Args:
         jwt_token: JWT authentication token with 'read' scope
+        is_completed: Optional filter by completion status ("true" or "false")
+        scheduled_date_from: Optional filter by scheduled date from (ISO 8601)
+        scheduled_date_to: Optional filter by scheduled date to (ISO 8601)
         
     Returns:
-        List of active alerts
+        List of payment reminders
     """
-    logger.info("Get alerts request received")
+    logger.info("Get reminders request received")
     
     try:
         # Authenticate user
         user = get_user_from_token(jwt_token)
-        logger.info(f"Get alerts request for user_id: {user.user_id}")
+        logger.info(f"Get reminders request for user_id: {user.user_id}")
+        
+        # Parse is_completed filter
+        is_completed_filter = None
+        if is_completed.lower() == "true":
+            is_completed_filter = True
+        elif is_completed.lower() == "false":
+            is_completed_filter = False
         
         # Query banking API with JWT token
         banking_api = BankingAPI()
-        alerts = await banking_api.get_alerts(user.user_id, jwt_token=jwt_token)
+        reminders = await banking_api.get_reminders(
+            user.user_id,
+            is_completed_filter,
+            scheduled_date_from if scheduled_date_from else None,
+            scheduled_date_to if scheduled_date_to else None,
+            jwt_token=jwt_token
+        )
         customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
         
-        if not alerts:
+        if not reminders:
             return [{
                 "customer_name": customer_name,
-                "has_alerts": False,
-                "message": f"Hello {customer_name}! You have no active alerts or reminders set up."
+                "has_reminders": False,
+                "message": f"Hello {customer_name}! You have no payment reminders set up."
             }]
         
-        # Format alerts
+        # Format reminders
         result = []
-        for alert in alerts:
-            status = "🟢 Active" if alert.get("active", False) else "🔴 Inactive"
+        for reminder in reminders:
+            status = "✅ Completed" if reminder.get("isCompleted", False) else "⏰ Pending"
             result.append({
                 "customer_name": customer_name,
-                "has_alerts": True,
-                "type": alert.get("type", ""),
-                "description": alert.get("description", ""),
+                "has_reminders": True,
+                "id": reminder.get("id", ""),
+                "scheduledDate": reminder.get("scheduledDate", ""),
+                "amount": reminder.get("amount", 0),
+                "recipient": reminder.get("recipient", ""),
+                "description": reminder.get("description", ""),
                 "status": status,
-                "created_at": alert.get("created_at", "")
+                "created_at": reminder.get("created_at", "")
             })
         
         logger.info(
-            f"Alerts retrieved for user_id: {user.user_id}, "
+            f"Reminders retrieved for user_id: {user.user_id}, "
             f"count: {len(result)}"
         )
         
@@ -645,6 +651,139 @@ async def get_alerts(jwt_token: str) -> List[dict]:
     except ValueError as e:
         logger.warning(f"Authentication error: {e}")
         raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error retrieving reminders: {e}")
+        raise ValueError(f"Failed to retrieve reminders: {str(e)}")
+
+
+@mcp.tool()
+async def update_reminder(
+    jwt_token: str,
+    reminder_id: str,
+    scheduled_date: str = "",
+    amount: str = "",
+    recipient: str = "",
+    description: str = "",
+    account_id: str = "",
+    is_completed: str = ""
+) -> dict:
+    """
+    Update an existing payment reminder.
+    
+    Args:
+        jwt_token: JWT authentication token with 'configure' scope
+        reminder_id: ID of the reminder to update
+        scheduled_date: Optional ISO 8601 date string for scheduled payment
+        amount: Optional payment amount (as string, will be converted to float)
+        recipient: Optional recipient name or payment address
+        description: Optional description of the reminder
+        account_id: Optional account ID for payment
+        is_completed: Optional completion status ("true" or "false")
+        
+    Returns:
+        Updated reminder details
+    """
+    logger.info(f"Update reminder request received for reminder_id: {reminder_id}")
+    
+    try:
+        # Authenticate user with configure scope
+        user = get_user_from_token(jwt_token, required_scope="configure")
+        logger.info(f"Update reminder request for user_id: {user.user_id}, reminder_id: {reminder_id}")
+        
+        # Parse optional parameters
+        amount_float = float(amount) if amount else None
+        is_completed_bool = None
+        if is_completed.lower() == "true":
+            is_completed_bool = True
+        elif is_completed.lower() == "false":
+            is_completed_bool = False
+        
+        # Query banking API with JWT token
+        banking_api = BankingAPI()
+        reminder = await banking_api.update_reminder(
+            user.user_id,
+            reminder_id,
+            scheduled_date if scheduled_date else None,
+            amount_float,
+            recipient if recipient else None,
+            description if description else None,
+            None,  # beneficiary_id
+            None,  # beneficiary_nickname
+            account_id if account_id else None,
+            is_completed_bool,
+            None,  # reminder_notification_settings
+            jwt_token=jwt_token
+        )
+        
+        customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
+        
+        result = {
+            "success": True,
+            "customer_name": customer_name,
+            "reminder": reminder,
+            "message": f"Payment reminder updated successfully for {customer_name}!"
+        }
+        
+        logger.info(f"Reminder updated for user_id: {user.user_id}, reminder_id: {reminder_id}")
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error updating reminder: {e}")
+        raise ValueError(f"Failed to update reminder: {str(e)}")
+
+
+@mcp.tool()
+async def delete_reminder(
+    jwt_token: str,
+    reminder_id: str
+) -> dict:
+    """
+    Delete a payment reminder.
+    
+    Args:
+        jwt_token: JWT authentication token with 'configure' scope
+        reminder_id: ID of the reminder to delete
+        
+    Returns:
+        Deletion confirmation
+    """
+    logger.info(f"Delete reminder request received for reminder_id: {reminder_id}")
+    
+    try:
+        # Authenticate user with configure scope
+        user = get_user_from_token(jwt_token, required_scope="configure")
+        logger.info(f"Delete reminder request for user_id: {user.user_id}, reminder_id: {reminder_id}")
+        
+        # Query banking API with JWT token
+        banking_api = BankingAPI()
+        await banking_api.delete_reminder(
+            user.user_id,
+            reminder_id,
+            jwt_token=jwt_token
+        )
+        
+        customer_name = await banking_api.get_customer_name(user.user_id) or "Customer"
+        
+        result = {
+            "success": True,
+            "customer_name": customer_name,
+            "message": f"Payment reminder deleted successfully for {customer_name}!"
+        }
+        
+        logger.info(f"Reminder deleted for user_id: {user.user_id}, reminder_id: {reminder_id}")
+        
+        return result
+        
+    except ValueError as e:
+        logger.warning(f"Authentication error: {e}")
+        raise ValueError(f"Authentication failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error deleting reminder: {e}")
+        raise ValueError(f"Failed to delete reminder: {str(e)}")
 
 
 @mcp.tool()
@@ -747,7 +886,6 @@ async def confirm_payment(
         # Call banking API to confirm payment
         banking_api = BankingAPI()
         result = await banking_api.confirm_payment(
-            user.user_id,
             payment_session_id,
             otp_code,
             jwt_token

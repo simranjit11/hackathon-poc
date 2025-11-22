@@ -70,7 +70,7 @@ async function main() {
         accounts: true,
         loans: true,
         transactions: true,
-        paymentAlerts: true,
+        paymentReminders: true,
         notificationPreferences: true
       }
     });
@@ -88,7 +88,7 @@ async function main() {
       await prisma.account.deleteMany({
         where: { userId: existingUser.id }
       });
-      await prisma.paymentAlert.deleteMany({
+      await prisma.paymentReminder.deleteMany({
         where: { userId: existingUser.id }
       });
       await prisma.notificationPreference.deleteMany({
@@ -228,26 +228,60 @@ async function main() {
     ]);
     console.log(`✓ Created ${transactions.length} transactions for ${user.email}`);
 
-    // Create payment alerts
-    const alerts = await Promise.all([
-      prisma.paymentAlert.create({
+    // Create payment reminders
+    const reminders = await Promise.all([
+      prisma.paymentReminder.create({
         data: {
           userId: user.id,
-          alertType: 'low_balance',
-          threshold: 100.00,
+          scheduledDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+          amount: 500.00,
+          recipient: 'Mom',
+          description: 'Monthly allowance',
+          beneficiaryId: beneficiaries[0]?.id,
           accountId: accounts[0].id,
-          isActive: true,
+          isCompleted: false,
+          reminderNotificationSettings: {
+            email: true,
+            sms: false,
+            push: true,
+          },
         },
       }),
-      prisma.paymentAlert.create({
+      prisma.paymentReminder.create({
         data: {
           userId: user.id,
-          alertType: 'payment_received',
-          isActive: true,
+          scheduledDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days from now
+          amount: 1200.00,
+          recipient: 'Landlord',
+          description: 'Monthly rent payment',
+          beneficiaryId: beneficiaries[1]?.id,
+          accountId: accounts[0].id,
+          isCompleted: false,
+          reminderNotificationSettings: {
+            email: true,
+            sms: true,
+            push: false,
+          },
+        },
+      }),
+      prisma.paymentReminder.create({
+        data: {
+          userId: user.id,
+          scheduledDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago (completed)
+          amount: 300.00,
+          recipient: 'Electric Company',
+          description: 'Utility bill payment',
+          accountId: accounts[1].id,
+          isCompleted: true,
+          reminderNotificationSettings: {
+            email: true,
+            sms: false,
+            push: false,
+          },
         },
       }),
     ]);
-    console.log(`✓ Created ${alerts.length} payment alerts for ${user.email}`);
+    console.log(`✓ Created ${reminders.length} payment reminders for ${user.email}`);
 
     // Create notification preferences
     const preferences = await Promise.all([
