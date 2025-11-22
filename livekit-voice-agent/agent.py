@@ -85,7 +85,6 @@ class Assistant(Agent):
             mcp_tools_wrapper = create_agno_mcp_tools(
                 self.user_id, 
                 self.session_id,
-                email=self.email
             )
             
             # Get list of Function objects (these use our HTTP client with JWT)
@@ -159,7 +158,7 @@ When a user asks about:
 - Credit limits → Use the get_credit_limit tool
 - Interest rates → Use the get_interest_rates tool
 - User profile/details → Use the get_user_details tool
-- Making payments → Use the make_payment_with_elicitation tool (collect to_account, amount, description first)
+- Making payments → Use the initiate_payment tool (collect from_account, to_account, amount first; description optional)
 - Creating reminders → Use the create_reminder tool (collect scheduled_date, amount, recipient, account_id first)
 - Getting reminders → Use the get_reminders tool (optional filters: is_completed, scheduled_date_from, scheduled_date_to)
 - Updating reminders → Use the update_reminder tool (requires reminder_id and fields to update)
@@ -189,17 +188,23 @@ When a user requests a payment/transfer (e.g., "Send $100 to John", "Pay Bob $50
      * Inform user: "I couldn't find a contact named [name]. Would you like to add them first or provide their account details?"
      * Do NOT proceed with payment
 
-3. FINALLY: Call initiate_payment with:
+3. CHECK if user specified source account:
+   - If user said "from checking" or "from savings" → Use that account
+   - If user did NOT specify → Call get_balance to show available accounts and ask: "Would you like to pay from your checking or savings account?"
+   - Wait for user to specify the account
+
+4. FINALLY: Call initiate_payment with:
+   - from_account: REQUIRED - The account type user selected ('checking' or 'savings')
    - to_account: Use the paymentAddress (UPI ID/account number) from the matched contact - NEVER use the name
    - amount: The amount user specified
-   - from_account: Optional - only if user specified (e.g., "from savings")
    - description: Optional - can include recipient's full name for clarity
 
 EXAMPLE:
-User: "Send $100 to John"
+User: "Send $100 to John from my checking account"
 Step 1: get_transfer_contacts() → Returns [{"nickname":"John","fullName":"John Jacob","paymentAddress":"john@okicici.com","paymentType":"upi"}]
 Step 2: Found 1 match for "John"
-Step 3: initiate_payment(to_account="john@okicici.com", amount=100, description="Transfer to John Jacob")
+Step 3: User specified "checking account"
+Step 4: initiate_payment(from_account="checking", to_account="john@okicici.com", amount=100, description="Transfer to John Jacob")
 
 Always call the appropriate tool first, then use the tool's response to answer the user's question. Never provide information without calling the tools first.
 
@@ -517,13 +522,10 @@ async def entrypoint(ctx: agents.JobContext):
         assistant.user_id = user_id
         assistant.email = email or f"user_{user_id}@example.com"
         assistant.session_id = room_name
-<<<<<<< HEAD
-=======
     
     # Store room reference for data channel access (elicitations)
     assistant.room = room
     logger.info(f"Set agent context: user_id={user_id}, email={assistant.email}, session_id={room_name}")
->>>>>>> f119990 (Add elicitation flow end to end)
 
     # Create agent session
     # Note: Using VAD (Voice Activity Detection) for turn detection instead of MultilingualModel
