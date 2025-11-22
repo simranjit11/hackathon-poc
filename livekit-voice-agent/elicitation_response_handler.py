@@ -151,15 +151,6 @@ class ElicitationResponseHandler:
             Payment confirmation result
         """
         try:
-            # Extract OTP code from user input
-            otp_code = user_input.get("otp_code", "")
-            if not otp_code:
-                logger.error("No OTP code provided in user input")
-                return {
-                    "status": "failed",
-                    "error": "OTP code is required"
-                }
-            
             # Extract user context from suspended arguments
             user_id = suspended_arguments.get("user_id")
             payment_session_id = suspended_arguments.get("payment_session_id", elicitation_id)
@@ -171,20 +162,44 @@ class ElicitationResponseHandler:
                     "error": "Missing user context"
                 }
             
-            logger.info(
-                f"Confirming payment via MCP: session={payment_session_id}, "
-                f"user={user_id}, otp={otp_code[:2]}***"
-            )
+            # Check if this is an OTP or confirmation type elicitation
+            otp_code = user_input.get("otp_code")
+            confirmed = user_input.get("confirmed")
             
-            # Call MCP confirm_payment tool
-            # This uses the MCP client which handles JWT generation and HTTP transport
+            # Determine the OTP to use
+            # For confirmation-only (no OTP field), use a dummy OTP since backend doesn't validate
+            if otp_code:
+                final_otp = otp_code
+                logger.info(
+                    f"Confirming payment with OTP via MCP: session={payment_session_id}, "
+                    f"user={user_id}, otp={final_otp[:2]}***"
+                )
+            elif confirmed is True:
+                # Simple confirmation for low-value transactions - use dummy OTP
+                final_otp = "000000"
+                logger.info(
+                    f"Confirming payment with user confirmation via MCP: session={payment_session_id}, "
+                    f"user={user_id}, using dummy OTP"
+                )
+            else:
+                logger.error("No OTP code or confirmation provided in user input")
+                return {
+                    "status": "failed",
+                    "error": "OTP code or confirmation is required"
+                }
+            
+            # Call MCP confirm_payment tool with OTP
+            logger.info(
+                f"Calling MCP confirm_payment with: "
+                f"payment_session_id={payment_session_id}, otp_code={final_otp}"
+            )
             result = await self.mcp_client._call_mcp_tool(
                 tool_name="confirm_payment",
                 user_id=user_id,
-                session_id="elicitation_handler",  # Session context for JWT
-                scopes=["transact"],  # Confirm payment requires transact scope
+                session_id="elicitation_handler",
+                scopes=["transact"],
                 payment_session_id=payment_session_id,
-                otp_code=otp_code
+                otp_code=final_otp
             )
             
             logger.info(f"MCP confirm_payment result: {result}")

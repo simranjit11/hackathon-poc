@@ -885,6 +885,7 @@ async def confirm_payment(
         # Call banking API to confirm payment
         banking_api = BankingAPI()
         result = await banking_api.confirm_payment(
+            user.user_id,
             payment_session_id,
             otp_code
         )

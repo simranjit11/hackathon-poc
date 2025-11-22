@@ -357,6 +357,31 @@ Keep responses clear, professional, and based on actual tool responses.""",
                         if isinstance(parsed_result, dict) and parsed_result.get('elicitation_id'):
                             logger.info(f"✅ Found elicitation in tool result: {parsed_result.get('elicitation_id')}")
                             elicitation_response = parsed_result
+                            
+                            # CRITICAL: Store elicitation state in Redis
+                            # This was missing - the orchestrator must save elicitation to Redis
+                            # so it can be retrieved when user responds
+                            try:
+                                from schemas.elicitation import ElicitationSchema
+                                elicitation_manager = get_elicitation_manager()
+                                
+                                schema_dict = elicitation_response.get('schema', {})
+                                elicitation_schema = ElicitationSchema(**schema_dict)
+                                
+                                elicitation_manager.create_elicitation(
+                                    tool_call_id=elicitation_response.get('tool_call_id', ''),
+                                    mcp_endpoint='initiate_payment',
+                                    user_id=self.user_id,
+                                    session_id=self.session_id,
+                                    room_name=self.session_id,  # Using session_id as room_name
+                                    schema=elicitation_schema,
+                                    suspended_tool_arguments=elicitation_response.get('suspended_arguments', {}),
+                                    timeout_seconds=schema_dict.get('timeout_seconds', 300)
+                                )
+                                logger.info(f"✅ Saved elicitation {elicitation_response.get('elicitation_id')} to Redis")
+                            except Exception as e:
+                                logger.error(f"❌ Failed to save elicitation to Redis: {e}", exc_info=True)
+                            
                             break
             else:
                 logger.warning("No tool results found in response")
@@ -581,15 +606,45 @@ async def entrypoint(ctx: agents.JobContext):
                             payment_result = result.get('payment_result', {})
                             confirmation = payment_result.get('confirmation_number', 'Unknown')
                             amount = payment_result.get('amount', 0)
+                            from_account = payment_result.get('from_account', 'your account')
+                            to_account = payment_result.get('to_account', 'the recipient')
                             
-                            await agent_session.generate_reply(
-                                instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
-                            )
+                            # Add confirmation to Agno agent's memory so it remembers the payment
+                            if assistant.agno_agent:
+                                try:
+                                    # Add a system message to the agent's conversation history
+                                    # This ensures the agent remembers that the payment was confirmed
+                                    await assistant.agno_agent.arun(
+                                        f"SYSTEM UPDATE: The user has confirmed the payment. The payment of {amount} from {from_account} to {to_account} has been completed successfully with confirmation number {confirmation}. Acknowledge this to the user naturally."
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Error updating Agno agent memory: {e}")
+                                    # Fallback to generate_reply if Agno fails
+                                    await agent_session.generate_reply(
+                                        instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
+                                    )
+                            else:
+                                await agent_session.generate_reply(
+                                    instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
+                                )
                         else:
                             error = result.get('error', 'Unknown error')
-                            await agent_session.generate_reply(
-                                instructions=f"Inform the user that their payment could not be completed: {error}"
-                            )
+                            
+                            # Add error to Agno agent's memory
+                            if assistant.agno_agent:
+                                try:
+                                    await assistant.agno_agent.arun(
+                                        f"SYSTEM UPDATE: The payment confirmation failed with error: {error}. Inform the user and offer to help retry."
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Error updating Agno agent memory: {e}")
+                                    await agent_session.generate_reply(
+                                        instructions=f"Inform the user that their payment could not be completed: {error}"
+                                    )
+                            else:
+                                await agent_session.generate_reply(
+                                    instructions=f"Inform the user that their payment could not be completed: {error}"
+                                )
                             
                     except Exception as e:
                         logger.error(f"[Elicitation] Error handling response: {e}", exc_info=True)
