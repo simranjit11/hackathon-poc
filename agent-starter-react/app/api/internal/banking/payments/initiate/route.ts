@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PaymentInitiationOptions, initiatePayment } from '@/lib/banking/payments';
+import { createLatencyLogger } from '@/lib/api-latency-logger';
+
+const latencyLogger = createLatencyLogger('/api/internal/banking/payments/initiate', 'POST');
 
 interface PaymentInitiateRequest {
   userId: string;
@@ -18,9 +21,12 @@ interface PaymentInitiateRequest {
  * Requires API key authentication
  */
 export async function POST(request: NextRequest) {
+  const startTime = latencyLogger.start();
+  
   const apiKey = request.headers.get('x-api-key');
 
   if (apiKey !== process.env.INTERNAL_API_KEY) {
+    latencyLogger.end(startTime, 401);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -30,6 +36,13 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!body.userId || !body.fromAccount || !body.amount) {
+      latencyLogger.end(startTime, 400, undefined, {
+        missing_fields: {
+          userId: !body.userId,
+          fromAccount: !body.fromAccount,
+          amount: !body.amount,
+        },
+      });
       return NextResponse.json(
         { error: 'userId, fromAccount and amount are required' },
         { status: 400 }
@@ -58,6 +71,9 @@ export async function POST(request: NextRequest) {
       !options.paymentAddress &&
       !options.toAccount
     ) {
+      latencyLogger.end(startTime, 400, undefined, {
+        error: 'Payment destination required',
+      });
       return NextResponse.json(
         {
           error:
@@ -76,6 +92,11 @@ export async function POST(request: NextRequest) {
       body.description
     );
 
+    latencyLogger.end(startTime, 200, undefined, {
+      paymentSessionId: result.paymentSessionId,
+      amount: body.amount,
+    });
+
     // Return response (include OTP in development mode)
     const isDevelopment = process.env.NODE_ENV === 'development';
 
@@ -91,19 +112,27 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error initiating payment:', error);
 
+    let statusCode = 500;
     if (error instanceof Error) {
       // Handle specific business logic errors
       if (error.message.includes('not found') || error.message.includes('Beneficiary')) {
-        return NextResponse.json({ error: error.message }, { status: 404 });
+        statusCode = 404;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
       if (error.message.includes('Insufficient') || error.message.includes('balance')) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        statusCode = 400;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
       if (error.message.includes('Invalid') || error.message.includes('required')) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        statusCode = 400;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
     }
 
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    latencyLogger.end(startTime, statusCode, error instanceof Error ? error : new Error(String(error)));
+    return NextResponse.json({ error: 'Internal server error' }, { status: statusCode });
   }
 }

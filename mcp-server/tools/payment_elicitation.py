@@ -45,10 +45,7 @@ def create_payment_elicitation_response(
     """
     elicitation_id = payment_session_id or str(uuid.uuid4())
     
-    # Determine elicitation type based on amount
-    # High value transactions require OTP
-    requires_otp = amount >= 1000.0
-    
+    # All payments now require OTP for security
     # Create masked context for display
     context = {
         "amount": f"₹{amount:,.2f}",
@@ -57,54 +54,32 @@ def create_payment_elicitation_response(
         "description": description or "Payment transfer"
     }
     
-    # Build elicitation schema
-    if requires_otp:
-        schema = {
-            "elicitation_id": elicitation_id,
-            "elicitation_type": "otp",
-            "fields": [
-                {
-                    "name": "otp_code",
-                    "label": "Enter OTP",
-                    "field_type": "otp",
-                    "validation": {
-                        "required": True,
-                        "min_length": 6,
-                        "max_length": 6,
-                        "pattern": r"^\d{6}$"
-                    },
-                    "placeholder": "000000",
-                    "help_text": "Enter the 6-digit OTP sent to your registered mobile number"
-                }
-            ],
-            "context": context,
-            "platform_requirements": {
-                "web": {"biometric_required": False},
-                "mobile": {"biometric_required": True}
-            },
-            "timeout_seconds": 300
-        }
-    else:
-        # Simple confirmation for lower amounts
-        schema = {
-            "elicitation_id": elicitation_id,
-            "elicitation_type": "confirmation",
-            "fields": [
-                {
-                    "name": "confirmed",
-                    "label": "Confirm Payment",
-                    "field_type": "boolean",
-                    "validation": {"required": True},
-                    "help_text": "Please confirm that you want to proceed with this payment"
-                }
-            ],
-            "context": context,
-            "platform_requirements": {
-                "web": {"biometric_required": False},
-                "mobile": {"biometric_required": True}
-            },
-            "timeout_seconds": 300
-        }
+    # Build elicitation schema - always use OTP
+    schema = {
+        "elicitation_id": elicitation_id,
+        "elicitation_type": "otp",
+        "fields": [
+            {
+                "name": "otp_code",
+                "label": "Enter OTP",
+                "field_type": "otp",
+                "validation": {
+                    "required": True,
+                    "min_length": 6,
+                    "max_length": 6,
+                    "pattern": r"^\d{6}$"
+                },
+                "placeholder": "000000",
+                "help_text": "Enter the 6-digit OTP sent to your registered mobile number"
+            }
+        ],
+        "context": context,
+        "platform_requirements": {
+            "web": {"biometric_required": False},
+            "mobile": {"biometric_required": True}
+        },
+        "timeout_seconds": 300
+    }
     
     # Return elicitation response
     # This signals to the orchestrator that elicitation is required

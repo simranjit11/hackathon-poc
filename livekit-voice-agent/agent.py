@@ -125,6 +125,23 @@ class Assistant(Agent):
 
 IMPORTANT: You MUST use the available tools to perform banking operations. Do not make up or guess information.
 
+CRITICAL: TOOL CALL ANNOUNCEMENTS
+- ALWAYS announce what you're about to do BEFORE calling any tool
+- Examples:
+  * Before calling get_transactions: "Hey, I'll check your transaction history. Give me a moment."
+  * Before calling get_balance: "Let me check your account balance for you."
+  * Before calling get_loans: "I'll look up your loan information right away."
+  * Before calling get_transfer_contacts: "Let me pull up your saved contacts."
+- Speak naturally and conversationally, then call the tool
+- This helps users understand what's happening and reduces perceived wait time
+
+PAYMENT COMPLETION AWARENESS:
+- When a payment is confirmed and completed, you will receive a notification about it
+- ALWAYS remember completed payments - they are stored in your conversation history
+- If a user asks about a recent payment or transaction, check your conversation history first
+- You will know about payments that were just completed because they are added to your memory
+- When discussing completed payments, reference the confirmation number and details from your memory
+
 FOR INITIAL GREETING (when user hasn't spoken yet):
 - If this is the first interaction and you need to greet the user, FIRST call the get_user_details tool to get the user's name
 - Then greet the user by name professionally (e.g., "Hello [name], how can I help you with your banking needs today?")
@@ -256,10 +273,31 @@ Keep responses clear, professional, and based on actual tool responses.""",
                             user_message = sanitized_message
                         break
         
-        # If no user message, this might be an initial greeting
+        # Check if this is a generate_reply call (instructions provided via system/assistant message)
+        # generate_reply() may pass instructions as system messages or assistant messages
+        if not user_message and items:
+            for item in reversed(items):
+                if hasattr(item, 'type') and item.type == 'message' and hasattr(item, 'role'):
+                    if item.role == "system" or item.role == "assistant":
+                        # Check if this is an instruction for generate_reply
+                        instruction_text = getattr(item, 'text_content', None) or getattr(item, 'content', None)
+                        if instruction_text:
+                            # Check for common instruction patterns
+                            if any(keyword in instruction_text for keyword in ["SYSTEM:", "Inform the user", "Great news", "Tell the user", "Acknowledge"]):
+                                user_message = instruction_text
+                                logger.info(f"Detected generate_reply instruction: {instruction_text[:150]}...")
+                                break
+                            # Also check if it's a direct instruction (not a user message)
+                            elif len(instruction_text) > 20 and ("payment" in instruction_text.lower() or "transaction" in instruction_text.lower()):
+                                user_message = instruction_text
+                                logger.info(f"Detected potential instruction message: {instruction_text[:150]}...")
+                                break
+        
+        # If no user message, this might be an initial greeting or generate_reply call
         # Still use Agno agent so it can call get_user_details for personalized greeting
         if not user_message:
             user_message = ""  # Empty message, but we'll still call Agno
+            logger.debug("No user message found, using empty string for Agno")
         
         # Run Agno agent with user message
         # Agno will automatically call MCP tools as needed
@@ -609,23 +647,79 @@ async def entrypoint(ctx: agents.JobContext):
                             from_account = payment_result.get('from_account', 'your account')
                             to_account = payment_result.get('to_account', 'the recipient')
                             
-                            # Add confirmation to Agno agent's memory so it remembers the payment
+                            # Format amount nicely
+                            amount_str = f"${amount:.2f}" if isinstance(amount, (int, float)) else str(amount)
+                            
+                            logger.info(
+                                f"✅ Payment completed: {amount_str} from {from_account} to {to_account}, "
+                                f"confirmation: {confirmation}"
+                            )
+                            
+                            # Update session state with payment completion
+                            try:
+                                session_manager = get_session_manager()
+                                if assistant.user_id and assistant.session_id:
+                                    # Store payment completion in session
+                                    session_manager.update_session(
+                                        assistant.session_id,
+                                        assistant.user_id,
+                                        {
+                                            "last_payment_confirmation": confirmation,
+                                            "last_payment_amount": amount_str,
+                                            "last_payment_from": from_account,
+                                            "last_payment_to": to_account,
+                                            "last_payment_completed_at": datetime.utcnow().isoformat()
+                                        }
+                                    )
+                                    logger.info(f"Updated session state with payment completion: {confirmation}")
+                            except Exception as e:
+                                logger.error(f"Error updating session state: {e}", exc_info=True)
+                            
+                            # Generate voice response by simulating a user message
+                            # This is more reliable than using generate_reply with instructions
                             if assistant.agno_agent:
                                 try:
-                                    # Add a system message to the agent's conversation history
-                                    # This ensures the agent remembers that the payment was confirmed
-                                    await assistant.agno_agent.arun(
-                                        f"SYSTEM UPDATE: The user has confirmed the payment. The payment of {amount} from {from_account} to {to_account} has been completed successfully with confirmation number {confirmation}. Acknowledge this to the user naturally."
+                                    logger.info("Processing payment completion notification...")
+                                    
+                                    # Create a user message that simulates the user confirming the payment
+                                    # This will go through the normal llm_node flow and generate a natural response
+                                    user_confirmation_message = (
+                                        f"I've confirmed the payment of {amount_str} from {from_account} "
+                                        f"to {to_account}. The confirmation number is {confirmation}."
                                     )
-                                except Exception as e:
-                                    logger.error(f"Error updating Agno agent memory: {e}")
-                                    # Fallback to generate_reply if Agno fails
+                                    
+                                    logger.info(f"Simulating user message to trigger agent response: {user_confirmation_message[:100]}...")
+                                    
+                                    # Use generate_reply with user_input to simulate a user message
+                                    # This will go through llm_node normally and trigger TTS
                                     await agent_session.generate_reply(
-                                        instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
+                                        user_input=user_confirmation_message
                                     )
+                                    
+                                    logger.info("Voice response generated for payment completion")
+                                    
+                                except Exception as e:
+                                    logger.error(f"Error processing payment completion: {e}", exc_info=True, stack_info=True)
+                                    # Fallback: try with a simpler message
+                                    try:
+                                        logger.info("Attempting fallback voice response...")
+                                        fallback_message = (
+                                            f"Payment of {amount_str} confirmed. Confirmation number {confirmation}."
+                                        )
+                                        await agent_session.generate_reply(
+                                            user_input=fallback_message
+                                        )
+                                        logger.info("Fallback voice response generated")
+                                    except Exception as fallback_error:
+                                        logger.error(f"Fallback generate_reply also failed: {fallback_error}", exc_info=True, stack_info=True)
+                                        # Last resort: log the error but don't crash
+                                        logger.error("Could not generate voice response for payment completion")
                             else:
+                                logger.warning("Agno agent not initialized, using fallback notification")
                                 await agent_session.generate_reply(
-                                    instructions=f"Inform the user that their payment of {amount} has been completed successfully with confirmation number {confirmation}."
+                                    user_input=(
+                                        f"Payment of {amount_str} confirmed. Confirmation number {confirmation}."
+                                    )
                                 )
                         else:
                             error = result.get('error', 'Unknown error')
@@ -639,11 +733,11 @@ async def entrypoint(ctx: agents.JobContext):
                                 except Exception as e:
                                     logger.error(f"Error updating Agno agent memory: {e}")
                                     await agent_session.generate_reply(
-                                        instructions=f"Inform the user that their payment could not be completed: {error}"
+                                        user_input=f"Payment confirmation failed: {error}"
                                     )
                             else:
                                 await agent_session.generate_reply(
-                                    instructions=f"Inform the user that their payment could not be completed: {error}"
+                                    user_input=f"Payment confirmation failed: {error}"
                                 )
                             
                     except Exception as e:

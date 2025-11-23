@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { confirmPayment } from '@/lib/banking/payments';
+import { createLatencyLogger } from '@/lib/api-latency-logger';
 
 interface PaymentConfirmRequest {
   userId: string;
@@ -7,15 +8,20 @@ interface PaymentConfirmRequest {
   otpCode: string;
 }
 
+const latencyLogger = createLatencyLogger('/api/internal/banking/payments/confirm', 'POST');
+
 /**
  * POST /api/internal/banking/payments/confirm
  * Internal API: Confirm payment with OTP and complete the transaction
  * Requires API key authentication
  */
 export async function POST(request: NextRequest) {
+  const startTime = latencyLogger.start();
+  
   const apiKey = request.headers.get('x-api-key');
 
   if (apiKey !== process.env.INTERNAL_API_KEY) {
+    latencyLogger.end(startTime, 401);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -25,6 +31,13 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!body.userId || !body.paymentSessionId || !body.otpCode) {
+      latencyLogger.end(startTime, 400, undefined, {
+        missing_fields: {
+          userId: !body.userId,
+          paymentSessionId: !body.paymentSessionId,
+          otpCode: !body.otpCode,
+        },
+      });
       return NextResponse.json(
         { error: 'userId, paymentSessionId and otpCode are required' },
         { status: 400 }
@@ -33,6 +46,11 @@ export async function POST(request: NextRequest) {
 
     // Confirm payment
     const result = await confirmPayment(body.userId, body.paymentSessionId, body.otpCode);
+
+    latencyLogger.end(startTime, 200, undefined, {
+      paymentSessionId: body.paymentSessionId,
+      transactionId: result.transaction.id,
+    });
 
     return NextResponse.json(
       {
@@ -44,6 +62,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error confirming payment:', error);
 
+    let statusCode = 500;
     if (error instanceof Error) {
       // Handle specific business logic errors
       if (
@@ -51,19 +70,28 @@ export async function POST(request: NextRequest) {
         error.message.includes('expired') ||
         error.message.includes('OTP')
       ) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        statusCode = 400;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
       if (error.message.includes('not found') || error.message.includes('session')) {
-        return NextResponse.json({ error: error.message }, { status: 404 });
+        statusCode = 404;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
       if (error.message.includes('already processed') || error.message.includes('completed')) {
-        return NextResponse.json({ error: error.message }, { status: 409 });
+        statusCode = 409;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
       if (error.message.includes('Insufficient') || error.message.includes('balance')) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        statusCode = 400;
+        latencyLogger.end(startTime, statusCode, error);
+        return NextResponse.json({ error: error.message }, { status: statusCode });
       }
     }
 
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    latencyLogger.end(startTime, statusCode, error instanceof Error ? error : new Error(String(error)));
+    return NextResponse.json({ error: 'Internal server error' }, { status: statusCode });
   }
 }
