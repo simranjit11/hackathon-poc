@@ -2,9 +2,8 @@
  * Prisma seed script
  * Run with: pnpm db:seed or npx prisma db seed
  */
-
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -71,35 +70,35 @@ async function main() {
         loans: true,
         transactions: true,
         paymentReminders: true,
-        notificationPreferences: true
-      }
+        notificationPreferences: true,
+      },
     });
 
     if (existingUser) {
       await prisma.beneficiary.deleteMany({
-        where: { userId: existingUser.id }
+        where: { userId: existingUser.id },
       });
       await prisma.transaction.deleteMany({
-        where: { userId: existingUser.id }
+        where: { userId: existingUser.id },
       });
       await prisma.loan.deleteMany({
-        where: { userId: existingUser.id }
+        where: { userId: existingUser.id },
       });
       await prisma.account.deleteMany({
-        where: { userId: existingUser.id }
+        where: { userId: existingUser.id },
       });
       await prisma.paymentReminder.deleteMany({
-        where: { userId: existingUser.id }
+        where: { userId: existingUser.id },
       });
       await prisma.notificationPreference.deleteMany({
-        where: { userId: existingUser.id }
+        where: { userId: existingUser.id },
       });
     }
 
     const user = await prisma.user.upsert({
       where: { email: userData.email },
       update: {
-        beneficiaries: userData.beneficiaries
+        beneficiaries: userData.beneficiaries,
       },
       create: userData,
     });
@@ -112,7 +111,7 @@ async function main() {
           userId: user.id,
           accountNumber: `CHK-${user.id.slice(0, 8)}-001`,
           accountType: 'checking',
-          balance: 5000.00,
+          balance: 5000.0,
           currency: 'USD',
           status: 'active',
         },
@@ -122,7 +121,7 @@ async function main() {
           userId: user.id,
           accountNumber: `SAV-${user.id.slice(0, 8)}-002`,
           accountType: 'savings',
-          balance: 15000.00,
+          balance: 15000.0,
           currency: 'USD',
           status: 'active',
         },
@@ -132,8 +131,8 @@ async function main() {
           userId: user.id,
           accountNumber: `CC-${user.id.slice(0, 8)}-003`,
           accountType: 'credit_card',
-          balance: 500.00, // Current balance (debt)
-          creditLimit: 10000.00,
+          balance: 500.0, // Current balance (debt)
+          creditLimit: 10000.0,
           currency: 'USD',
           status: 'active',
         },
@@ -148,9 +147,9 @@ async function main() {
           userId: user.id,
           loanType: 'mortgage',
           loanNumber: `MORT-${user.id.slice(0, 8)}-001`,
-          outstandingBalance: 250000.00,
+          outstandingBalance: 250000.0,
           interestRate: 0.0375, // 3.75%
-          monthlyPayment: 1200.00,
+          monthlyPayment: 1200.0,
           remainingTermMonths: 240,
           nextPaymentDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000), // 15 days from now
         },
@@ -160,9 +159,9 @@ async function main() {
           userId: user.id,
           loanType: 'auto',
           loanNumber: `AUTO-${user.id.slice(0, 8)}-001`,
-          outstandingBalance: 15000.00,
+          outstandingBalance: 15000.0,
           interestRate: 0.045, // 4.5%
-          monthlyPayment: 350.00,
+          monthlyPayment: 350.0,
           remainingTermMonths: 48,
           nextPaymentDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000), // 20 days from now
         },
@@ -183,7 +182,7 @@ async function main() {
           userId: user.id,
           accountId: accounts[0].id, // Checking account
           transactionType: 'payment',
-          amount: 100.00,
+          amount: 100.0,
           currency: 'USD',
           fromAccount: accounts[0].accountNumber,
           toAccount: beneficiaries[0]?.paymentAddress || 'external@upi',
@@ -199,7 +198,7 @@ async function main() {
           userId: user.id,
           accountId: accounts[0].id,
           transactionType: 'transfer',
-          amount: 500.00,
+          amount: 500.0,
           currency: 'USD',
           fromAccount: accounts[0].accountNumber,
           toAccount: accounts[1].accountNumber, // Internal transfer to savings
@@ -215,7 +214,7 @@ async function main() {
           userId: user.id,
           accountId: accounts[0].id,
           transactionType: 'payment',
-          amount: 200.00,
+          amount: 200.0,
           currency: 'USD',
           fromAccount: accounts[0].accountNumber,
           toAccount: beneficiaries[1]?.paymentAddress || 'external@account',
@@ -234,7 +233,7 @@ async function main() {
         data: {
           userId: user.id,
           scheduledDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-          amount: 500.00,
+          amount: 500.0,
           recipient: 'Mom',
           description: 'Monthly allowance',
           beneficiaryId: beneficiaries[0]?.id,
@@ -251,7 +250,7 @@ async function main() {
         data: {
           userId: user.id,
           scheduledDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days from now
-          amount: 1200.00,
+          amount: 1200.0,
           recipient: 'Landlord',
           description: 'Monthly rent payment',
           beneficiaryId: beneficiaries[1]?.id,
@@ -268,7 +267,7 @@ async function main() {
         data: {
           userId: user.id,
           scheduledDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago (completed)
-          amount: 300.00,
+          amount: 300.0,
           recipient: 'Electric Company',
           description: 'Utility bill payment',
           accountId: accounts[1].id,

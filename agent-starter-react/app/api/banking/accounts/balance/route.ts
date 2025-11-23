@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     // Format response with availableBalance calculation
     const balances = accounts.map((account) => {
       let availableBalance: number;
-      
+
       if (account.accountType === 'credit_card') {
         // For credit cards: availableBalance = creditLimit - balance (available credit)
         const creditLimit = account.creditLimit ? Number(account.creditLimit) : 0;
@@ -81,23 +81,17 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching account balances:', error);
 
     if (error instanceof Error && error.message.includes('missing')) {
-      return corsResponse(
-        { error: 'Authorization header is required' },
-        401
-      );
+      return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
-      return corsResponse(
-        { error: error.message },
-        401
-      );
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
+      return corsResponse({ error: error.message }, 401);
     }
 
-    return corsResponse(
-      { error: 'Internal server error' },
-      500
-    );
+    return corsResponse({ error: 'Internal server error' }, 500);
   }
 }
 
@@ -107,5 +101,3 @@ export async function GET(request: NextRequest) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

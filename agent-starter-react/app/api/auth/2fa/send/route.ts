@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { corsResponse, corsPreflight } from '@/lib/cors';
-import { storeOTP } from '@/lib/otp-store';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { initializeDatabases } from '@/lib/db/init';
+import { storeOTP } from '@/lib/otp-store';
 
 /**
  * Generate a 6-digit OTP code
@@ -39,17 +39,11 @@ export async function POST(req: Request) {
 
     // Validate required fields
     if (!method || !phoneOrEmail) {
-      return corsResponse(
-        { error: 'Method and phoneOrEmail are required' },
-        400
-      );
+      return corsResponse({ error: 'Method and phoneOrEmail are required' }, 400);
     }
 
     if (method !== 'sms' && method !== 'email') {
-      return corsResponse(
-        { error: 'Method must be "sms" or "email"' },
-        400
-      );
+      return corsResponse({ error: 'Method must be "sms" or "email"' }, 400);
     }
 
     // Generate OTP
@@ -63,13 +57,16 @@ export async function POST(req: Request) {
     // For hackathon, log it (in production, never log OTPs!)
     console.log(`[DEV ONLY] OTP for ${phoneOrEmail}: ${otpCode} (session: ${sessionId})`);
 
-    return corsResponse({
-      sessionId,
-      message: `OTP sent to ${method === 'sms' ? 'phone' : 'email'}`,
-      // In production, don't return the OTP!
-      // For hackathon testing, include it in dev mode only
-      ...(process.env.NODE_ENV === 'development' && { otpCode }),
-    }, 200);
+    return corsResponse(
+      {
+        sessionId,
+        message: `OTP sent to ${method === 'sms' ? 'phone' : 'email'}`,
+        // In production, don't return the OTP!
+        // For hackathon testing, include it in dev mode only
+        ...(process.env.NODE_ENV === 'development' && { otpCode }),
+      },
+      200
+    );
   } catch (error) {
     console.error('2FA send error:', error);
     return corsResponse(
@@ -85,4 +82,3 @@ export async function POST(req: Request) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-

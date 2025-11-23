@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { testRedisConnection } from '@/lib/db/redis';
 import { prisma } from '@/lib/db/prisma';
+import { testRedisConnection } from '@/lib/db/redis';
 
 /**
  * GET /api/health
@@ -46,4 +46,3 @@ export async function GET() {
     status: health.status === 'healthy' ? 200 : 503,
   });
 }
-

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { prisma } from '@/lib/db/prisma';
 
 const VALID_CHANNELS = ['email', 'sms', 'push'];
@@ -53,7 +53,10 @@ export async function GET(request: NextRequest) {
       return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
       return corsResponse({ error: error.message }, 401);
     }
 
@@ -80,18 +83,12 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!channel || !eventType) {
-      return corsResponse(
-        { error: 'channel and eventType are required' },
-        400
-      );
+      return corsResponse({ error: 'channel and eventType are required' }, 400);
     }
 
     // Validate channel
     if (!VALID_CHANNELS.includes(channel)) {
-      return corsResponse(
-        { error: `channel must be one of: ${VALID_CHANNELS.join(', ')}` },
-        400
-      );
+      return corsResponse({ error: `channel must be one of: ${VALID_CHANNELS.join(', ')}` }, 400);
     }
 
     // Validate eventType
@@ -150,7 +147,10 @@ export async function POST(request: NextRequest) {
       return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
       return corsResponse({ error: error.message }, 401);
     }
 
@@ -169,5 +169,3 @@ export async function POST(request: NextRequest) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

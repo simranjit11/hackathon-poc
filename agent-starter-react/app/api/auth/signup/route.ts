@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createUser, userToIdentity } from '@/lib/users';
-import { generateAccessToken } from '@/lib/jwt';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { initializeDatabases } from '@/lib/db/init';
+import { generateAccessToken } from '@/lib/jwt';
+import { createUser, userToIdentity } from '@/lib/users';
 
 /**
  * Signup request body
@@ -56,27 +56,18 @@ export async function POST(req: Request) {
 
     // Validate required fields
     if (!email || !password) {
-      return corsResponse(
-        { error: 'Email and password are required' },
-        400
-      );
+      return corsResponse({ error: 'Email and password are required' }, 400);
     }
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return corsResponse(
-        { error: 'Invalid email format' },
-        400
-      );
+      return corsResponse({ error: 'Invalid email format' }, 400);
     }
 
     // Validate password strength (minimum 8 characters)
     if (password.length < 8) {
-      return corsResponse(
-        { error: 'Password must be at least 8 characters long' },
-        400
-      );
+      return corsResponse({ error: 'Password must be at least 8 characters long' }, 400);
     }
 
     // Create user
@@ -85,10 +76,7 @@ export async function POST(req: Request) {
       user = await createUser(email, password, ['customer'], ['read'], name);
     } catch (error) {
       if (error instanceof Error && error.message === 'User already exists') {
-        return corsResponse(
-          { error: 'An account with this email already exists' },
-          409
-        );
+        return corsResponse({ error: 'An account with this email already exists' }, 409);
       }
       throw error;
     }
@@ -111,14 +99,10 @@ export async function POST(req: Request) {
     return corsResponse(response, 201);
   } catch (error) {
     console.error('Signup error:', error);
-    return corsResponse(
-      { error: 'Failed to create account. Please try again.' },
-      500
-    );
+    return corsResponse({ error: 'Failed to create account. Please try again.' }, 500);
   }
 }
 
 export async function OPTIONS() {
   return corsPreflight();
 }
-

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
-import { prisma } from './db/prisma';
-import type { UserIdentity } from './auth';
 import type { User } from '@prisma/client';
+import type { UserIdentity } from './auth';
+import { prisma } from './db/prisma';
 
 /**
  * User data structure (Prisma-generated type)
@@ -10,7 +10,7 @@ export type { User };
 
 /**
  * Finds a user by email
- * 
+ *
  * @param email - User email address
  * @returns User object or null if not found
  */
@@ -29,7 +29,7 @@ export async function findUserByEmail(email: string): Promise<User | null> {
 
 /**
  * Finds a user by ID
- * 
+ *
  * @param id - User ID
  * @returns User object or null if not found
  */
@@ -48,15 +48,12 @@ export async function findUserById(id: string): Promise<User | null> {
 
 /**
  * Validates user credentials
- * 
+ *
  * @param email - User email
  * @param password - Plain text password
  * @returns User object if credentials are valid, null otherwise
  */
-export async function validateCredentials(
-  email: string,
-  password: string
-): Promise<User | null> {
+export async function validateCredentials(email: string, password: string): Promise<User | null> {
   const user = await findUserByEmail(email);
   if (!user) {
     return null;
@@ -83,7 +80,7 @@ export async function validateCredentials(
 
 /**
  * Converts a User object to UserIdentity
- * 
+ *
  * @param user - User object
  * @returns UserIdentity object
  */
@@ -98,7 +95,7 @@ export function userToIdentity(user: User): UserIdentity {
 
 /**
  * Creates a new user with default beneficiaries
- * 
+ *
  * @param email - User email
  * @param password - Plain text password
  * @param roles - User roles
@@ -130,40 +127,40 @@ export async function createUser(
         permissions,
         name,
         beneficiaries: {
-            create: [
-                {
-                    nickname: 'Mom',
-                    fullName: 'Mother',
-                    paymentAddress: 'mom@upi',
-                    paymentType: 'upi',
-                    bankName: 'Family Bank',
-                },
-                {
-                    nickname: 'Bob',
-                    fullName: 'Bob Builder',
-                    paymentAddress: 'bob@upi',
-                    paymentType: 'upi',
-                    bankName: 'Construction Bank',
-                },
-                {
-                    nickname: 'Joe',
-                    fullName: 'Joe Average',
-                    paymentAddress: 'joe@upi',
-                    paymentType: 'upi',
-                    bankName: 'Regular Bank',
-                }
-            ]
+          create: [
+            {
+              nickname: 'Mom',
+              fullName: 'Mother',
+              paymentAddress: 'mom@upi',
+              paymentType: 'upi',
+              bankName: 'Family Bank',
+            },
+            {
+              nickname: 'Bob',
+              fullName: 'Bob Builder',
+              paymentAddress: 'bob@upi',
+              paymentType: 'upi',
+              bankName: 'Construction Bank',
+            },
+            {
+              nickname: 'Joe',
+              fullName: 'Joe Average',
+              paymentAddress: 'joe@upi',
+              paymentType: 'upi',
+              bankName: 'Regular Bank',
+            },
+          ],
         },
         accounts: {
-            create: [
-                {
-                    accountType: 'savings',
-                    accountNumber: `SAV-${Date.now()}`,
-                    balance: 1000.00,
-                    currency: 'USD',
-                }
-            ]
-        }
+          create: [
+            {
+              accountType: 'savings',
+              accountNumber: `SAV-${Date.now()}`,
+              balance: 1000.0,
+              currency: 'USD',
+            },
+          ],
+        },
       },
     });
   } catch (error) {
@@ -174,16 +171,13 @@ export async function createUser(
 
 /**
  * Update user password
- * 
+ *
  * @param userId - User ID
  * @param newPassword - New plain text password
  */
-export async function updateUserPassword(
-  userId: string,
-  newPassword: string
-): Promise<void> {
+export async function updateUserPassword(userId: string, newPassword: string): Promise<void> {
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  
+
   await prisma.user.update({
     where: { id: userId },
     data: { passwordHash },

@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, FormEvent, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/auth/auth-provider';
 import { Button } from '@/components/livekit/button';
 import { Input } from '@/components/ui/input';
-import { useAuth } from '@/components/auth/auth-provider';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -48,20 +48,16 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center bg-background px-4">
+    <div className="bg-background flex min-h-svh flex-col items-center justify-center px-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <h1 className="text-foreground text-3xl font-bold tracking-tight">
-            Welcome back
-          </h1>
-          <p className="text-muted-foreground mt-2 text-sm">
-            Sign in to your account to continue
-          </p>
+          <h1 className="text-foreground text-3xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-muted-foreground mt-2 text-sm">Sign in to your account to continue</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="bg-destructive/10 text-destructive rounded-full border border-destructive/20 px-4 py-3 text-sm">
+            <div className="bg-destructive/10 text-destructive border-destructive/20 rounded-full border px-4 py-3 text-sm">
               {error}
             </div>
           )}
@@ -100,13 +96,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            className="w-full"
-            disabled={isLoading}
-          >
+          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={isLoading}>
             {isLoading ? 'Signing in...' : 'Sign in'}
           </Button>
         </form>
@@ -114,10 +104,7 @@ export default function LoginPage() {
         <div className="text-center">
           <p className="text-muted-foreground text-sm">
             Don't have an account?{' '}
-            <Link
-              href="/signup"
-              className="text-primary hover:underline font-medium"
-            >
+            <Link href="/signup" className="text-primary font-medium hover:underline">
               Sign up
             </Link>
           </p>

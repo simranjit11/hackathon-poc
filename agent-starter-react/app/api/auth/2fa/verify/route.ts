@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { corsResponse, corsPreflight } from '@/lib/cors';
-import { verifyOTP } from '@/lib/otp-store';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { initializeDatabases } from '@/lib/db/init';
+import { verifyOTP } from '@/lib/otp-store';
 
 // Initialize databases on first request
 let dbInitialized = false;
@@ -32,25 +32,22 @@ export async function POST(req: Request) {
 
     // Validate required fields
     if (!code || !sessionId) {
-      return corsResponse(
-        { error: 'Code and sessionId are required' },
-        400
-      );
+      return corsResponse({ error: 'Code and sessionId are required' }, 400);
     }
 
     // Verify OTP
     const isValid = await verifyOTP(sessionId, code);
     if (!isValid) {
-      return corsResponse(
-        { error: 'Invalid or expired OTP code' },
-        400
-      );
+      return corsResponse({ error: 'Invalid or expired OTP code' }, 400);
     }
 
-    return corsResponse({
-      success: true,
-      message: 'OTP verified successfully',
-    }, 200);
+    return corsResponse(
+      {
+        success: true,
+        message: 'OTP verified successfully',
+      },
+      200
+    );
   } catch (error) {
     console.error('2FA verify error:', error);
     return corsResponse(
@@ -66,4 +63,3 @@ export async function POST(req: Request) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-

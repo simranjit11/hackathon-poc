@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Users, Edit2, Check } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, Edit2, Plus, Trash2, Users, X } from 'lucide-react';
 import { Button } from '@/components/livekit/button';
 import { getAccessToken } from '@/lib/auth';
 
@@ -102,7 +102,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
   const handleUpdateContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingId) return;
-    
+
     setError(null);
 
     try {
@@ -185,7 +185,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
     <>
       {/* Sidebar */}
       <div
-        className={`fixed left-0 top-0 z-40 h-full w-80 transform bg-background shadow-2xl transition-transform duration-300 ease-in-out ${
+        className={`bg-background fixed top-0 left-0 z-40 h-full w-80 transform shadow-2xl transition-transform duration-300 ease-in-out ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -201,7 +201,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
             </div>
             <button
               onClick={onToggle}
-              className="rounded-lg p-2 transition-colors hover:bg-accent"
+              className="hover:bg-accent rounded-lg p-2 transition-colors"
               aria-label="Close contacts"
             >
               <X className="size-5" />
@@ -211,7 +211,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-4">
             {error && (
-              <div className="mb-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="bg-destructive/10 text-destructive mb-4 rounded-lg p-3 text-sm">
                 {error}
               </div>
             )}
@@ -227,7 +227,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
                   {contacts.map((contact) => (
                     <div
                       key={contact.id}
-                      className="group relative rounded-lg border p-3 transition-colors hover:bg-accent"
+                      className="group hover:bg-accent relative rounded-lg border p-3 transition-colors"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -241,14 +241,14 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
                         <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                           <button
                             onClick={() => startEditing(contact)}
-                            className="rounded p-1 hover:bg-background"
+                            className="hover:bg-background rounded p-1"
                             aria-label="Edit contact"
                           >
                             <Edit2 className="size-4" />
                           </button>
                           <button
                             onClick={() => handleDeleteContact(contact.id)}
-                            className="rounded p-1 hover:bg-background"
+                            className="hover:bg-background rounded p-1"
                             aria-label="Delete contact"
                           >
                             <Trash2 className="text-destructive size-4" />
@@ -271,13 +271,16 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
           {/* Add/Edit Contact Form or Button */}
           <div className="border-t p-4">
             {isAdding || editingId ? (
-              <form onSubmit={editingId ? handleUpdateContact : handleAddContact} className="space-y-3">
+              <form
+                onSubmit={editingId ? handleUpdateContact : handleAddContact}
+                className="space-y-3"
+              >
                 <input
                   type="text"
                   placeholder="Nickname (e.g., Mom)"
                   value={formData.nickname}
                   onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  className="bg-background w-full rounded-lg border px-3 py-2 text-sm"
                   required
                 />
                 <input
@@ -285,7 +288,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
                   placeholder="Full Name"
                   value={formData.fullName}
                   onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  className="bg-background w-full rounded-lg border px-3 py-2 text-sm"
                   required
                 />
                 <input
@@ -293,7 +296,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
                   placeholder="Payment Address (UPI ID or Account)"
                   value={formData.paymentAddress}
                   onChange={(e) => setFormData({ ...formData, paymentAddress: e.target.value })}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  className="bg-background w-full rounded-lg border px-3 py-2 text-sm"
                   required
                 />
                 <select
@@ -301,7 +304,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, paymentType: e.target.value as 'upi' | 'account' })
                   }
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  className="bg-background w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option value="upi">UPI</option>
                   <option value="account">Account</option>
@@ -311,7 +314,7 @@ export function ContactsSidebar({ isOpen, onToggle }: ContactsSidebarProps) {
                   placeholder="Bank Name (optional)"
                   value={formData.bankName}
                   onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                  className="bg-background w-full rounded-lg border px-3 py-2 text-sm"
                 />
                 <div className="flex gap-2">
                   <Button type="submit" className="flex-1" size="sm">

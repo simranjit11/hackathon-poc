@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { setAccessToken, clearAccessToken } from '@/lib/auth';
+import { useCallback, useState } from 'react';
+import { clearAccessToken, setAccessToken } from '@/lib/auth';
 
 /**
  * Login request payload
@@ -27,7 +27,7 @@ export interface LoginResponse {
 
 /**
  * Login hook for web application
- * 
+ *
  * @returns Login function and loading state
  */
 export function useLogin() {
@@ -53,7 +53,7 @@ export function useLogin() {
       }
 
       const data: LoginResponse = await response.json();
-      
+
       // Store access token
       setAccessToken(data.accessToken);
 
@@ -79,4 +79,3 @@ export function useLogin() {
     error,
   };
 }
-

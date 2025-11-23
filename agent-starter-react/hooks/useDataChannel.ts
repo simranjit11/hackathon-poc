@@ -3,10 +3,9 @@
  * ==========================
  * Hook for handling data channel messages including elicitation requests.
  */
-
-import { useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { DataPacket_Kind, RoomEvent } from 'livekit-client';
 import { useRoomContext } from '@livekit/components-react';
-import { RoomEvent, DataPacket_Kind } from 'livekit-client';
 import type { ElicitationMessage } from '@/lib/elicitation-types';
 
 export interface DataChannelMessage {
@@ -23,11 +22,11 @@ export interface UseDataChannelOptions {
 export function useDataChannel(options: UseDataChannelOptions = {}) {
   const room = useRoomContext();
   const { onElicitationReceived, onMessage } = options;
-  
+
   // Use refs to avoid recreating callbacks on every render
   const onElicitationRef = useRef(onElicitationReceived);
   const onMessageRef = useRef(onMessage);
-  
+
   useEffect(() => {
     onElicitationRef.current = onElicitationReceived;
     onMessageRef.current = onMessage;
@@ -37,11 +36,7 @@ export function useDataChannel(options: UseDataChannelOptions = {}) {
   useEffect(() => {
     if (!room) return;
 
-    const handleDataReceived = (
-      payload: Uint8Array,
-      participant?: any,
-      kind?: DataPacket_Kind
-    ) => {
+    const handleDataReceived = (payload: Uint8Array, participant?: any, kind?: DataPacket_Kind) => {
       try {
         // Decode the data
         const decoder = new TextDecoder();
@@ -96,10 +91,7 @@ export function useDataChannel(options: UseDataChannelOptions = {}) {
         const encoder = new TextEncoder();
         const payload = encoder.encode(JSON.stringify(data));
 
-        await room.localParticipant.publishData(
-          payload,
-          DataPacket_Kind.RELIABLE
-        );
+        await room.localParticipant.publishData(payload, { reliable: true });
 
         console.log('[DataChannel] Sent message:', data);
         return true;
@@ -116,4 +108,3 @@ export function useDataChannel(options: UseDataChannelOptions = {}) {
     isConnected: !!room && room.state === 'connected',
   };
 }
-

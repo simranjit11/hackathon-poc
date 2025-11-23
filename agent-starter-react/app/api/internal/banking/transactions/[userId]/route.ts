@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requireApiKey } from '@/lib/api-key-auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -96,7 +96,10 @@ export async function GET(
     if (transactionType) {
       if (!['payment', 'transfer', 'deposit', 'withdrawal'].includes(transactionType)) {
         return corsResponse(
-          { error: 'Invalid transactionType. Must be one of: payment, transfer, deposit, withdrawal' },
+          {
+            error:
+              'Invalid transactionType. Must be one of: payment, transfer, deposit, withdrawal',
+          },
           400
         );
       }
@@ -184,5 +187,3 @@ export async function GET(
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

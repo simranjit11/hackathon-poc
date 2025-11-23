@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -34,17 +34,11 @@ export async function GET(request: NextRequest) {
     const offset = offsetParam ? parseInt(offsetParam, 10) : 0;
 
     if (limit < 1 || limit > 100) {
-      return corsResponse(
-        { error: 'limit must be between 1 and 100' },
-        400
-      );
+      return corsResponse({ error: 'limit must be between 1 and 100' }, 400);
     }
 
     if (offset < 0) {
-      return corsResponse(
-        { error: 'offset must be non-negative' },
-        400
-      );
+      return corsResponse({ error: 'offset must be non-negative' }, 400);
     }
 
     // Validate date range
@@ -53,19 +47,13 @@ export async function GET(request: NextRequest) {
       const end = new Date(endDate);
 
       if (start > end) {
-        return corsResponse(
-          { error: 'startDate must be before endDate' },
-          400
-        );
+        return corsResponse({ error: 'startDate must be before endDate' }, 400);
       }
 
       // Check if date range exceeds 1 year
       const oneYearInMs = 365 * 24 * 60 * 60 * 1000;
       if (end.getTime() - start.getTime() > oneYearInMs) {
-        return corsResponse(
-          { error: 'Date range cannot exceed 1 year' },
-          400
-        );
+        return corsResponse({ error: 'Date range cannot exceed 1 year' }, 400);
       }
     }
 
@@ -92,7 +80,10 @@ export async function GET(request: NextRequest) {
     if (transactionType) {
       if (!['payment', 'transfer', 'deposit', 'withdrawal'].includes(transactionType)) {
         return corsResponse(
-          { error: 'Invalid transactionType. Must be one of: payment, transfer, deposit, withdrawal' },
+          {
+            error:
+              'Invalid transactionType. Must be one of: payment, transfer, deposit, withdrawal',
+          },
           400
         );
       }
@@ -174,23 +165,17 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching transactions:', error);
 
     if (error instanceof Error && error.message.includes('missing')) {
-      return corsResponse(
-        { error: 'Authorization header is required' },
-        401
-      );
+      return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
-      return corsResponse(
-        { error: error.message },
-        401
-      );
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
+      return corsResponse({ error: error.message }, 401);
     }
 
-    return corsResponse(
-      { error: 'Internal server error' },
-      500
-    );
+    return corsResponse({ error: 'Internal server error' }, 500);
   }
 }
 
@@ -200,5 +185,3 @@ export async function GET(request: NextRequest) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

@@ -3,19 +3,18 @@
  * ============================
  * Manages elicitation state and UI rendering.
  */
-
-import { useState, useCallback, useEffect } from 'react';
-import { useDataChannel } from './useDataChannel';
+import { useCallback, useEffect, useState } from 'react';
 import type {
+  ElicitationMessage,
   ElicitationRequest,
   ElicitationResponse,
-  ElicitationMessage,
 } from '@/lib/elicitation-types';
 import {
-  isElicitationRequest,
   isElicitationCancellation,
   isElicitationExpiration,
+  isElicitationRequest,
 } from '@/lib/elicitation-types';
+import { useDataChannel } from './useDataChannel';
 
 export interface ElicitationState {
   active: boolean;
@@ -77,11 +76,11 @@ export function useElicitation() {
 
       if (!isConnected) {
         console.error('[Elicitation] Not connected to data channel');
-        setState(prev => ({ ...prev, error: 'Not connected. Please try again.' }));
+        setState((prev) => ({ ...prev, error: 'Not connected. Please try again.' }));
         return false;
       }
 
-      setState(prev => ({ ...prev, isSubmitting: true, error: null }));
+      setState((prev) => ({ ...prev, isSubmitting: true, error: null }));
 
       try {
         const response: ElicitationResponse = {
@@ -106,7 +105,7 @@ export function useElicitation() {
           });
           return true;
         } else {
-          setState(prev => ({
+          setState((prev) => ({
             ...prev,
             isSubmitting: false,
             error: 'Failed to send response. Please try again.',
@@ -115,7 +114,7 @@ export function useElicitation() {
         }
       } catch (error) {
         console.error('[Elicitation] Error submitting response:', error);
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           isSubmitting: false,
           error: error instanceof Error ? error.message : 'Failed to submit response',
@@ -138,7 +137,7 @@ export function useElicitation() {
 
   // Clear error
   const clearError = useCallback(() => {
-    setState(prev => ({ ...prev, error: null }));
+    setState((prev) => ({ ...prev, error: null }));
   }, []);
 
   return {
@@ -149,4 +148,3 @@ export function useElicitation() {
     isConnected,
   };
 }
-

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
-import { validateAccessToken, extractTokenFromHeader, type UserIdentity } from '@/lib/auth';
+import { type UserIdentity, extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     // Extract and validate access token from Authorization header
     const authHeader = req.headers.get('Authorization');
     let userIdentity: UserIdentity;
-    
+
     try {
       const token = extractTokenFromHeader(authHeader);
       userIdentity = await validateAccessToken(token);
@@ -91,7 +91,7 @@ function createParticipantToken(
     ...userInfo,
     ttl: '1h', // Set token expiration to 1 hour as per requirements
   });
-  
+
   const grant: VideoGrant = {
     room: roomName,
     roomJoin: true,

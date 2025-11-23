@@ -12,15 +12,19 @@ interface OTPEntry {
 
 /**
  * Store an OTP code in Redis
- * 
+ *
  * @param sessionId - Session identifier
  * @param code - OTP code
  * @param ttlSeconds - Time to live in seconds (default: 5 minutes)
  */
-export async function storeOTP(sessionId: string, code: string, ttlSeconds: number = 300): Promise<void> {
+export async function storeOTP(
+  sessionId: string,
+  code: string,
+  ttlSeconds: number = 300
+): Promise<void> {
   const redis = getRedisClient();
   const key = `otp:${sessionId}`;
-  
+
   const data: OTPEntry = {
     code,
     expiresAt: Date.now() + ttlSeconds * 1000,
@@ -31,7 +35,7 @@ export async function storeOTP(sessionId: string, code: string, ttlSeconds: numb
 
 /**
  * Get and verify an OTP code from Redis
- * 
+ *
  * @param sessionId - Session identifier
  * @param code - OTP code to verify
  * @returns True if code is valid, false otherwise
@@ -70,7 +74,7 @@ export async function verifyOTP(sessionId: string, code: string): Promise<boolea
 
 /**
  * Get OTP entry (for debugging)
- * 
+ *
  * @param sessionId - Session identifier
  * @returns OTP entry or null
  */
@@ -85,7 +89,7 @@ export async function getOTP(sessionId: string): Promise<OTPEntry | null> {
     }
 
     const data: OTPEntry = JSON.parse(dataStr);
-    
+
     // Check expiration
     if (data.expiresAt < Date.now()) {
       await redis.del(key);
@@ -105,7 +109,7 @@ export async function getOTP(sessionId: string): Promise<OTPEntry | null> {
  */
 export async function clearAllOTPs(): Promise<void> {
   const redis = getRedisClient();
-  
+
   try {
     const keys = await redis.keys('otp:*');
     if (keys.length > 0) {
@@ -119,14 +123,14 @@ export async function clearAllOTPs(): Promise<void> {
 
 /**
  * Get remaining TTL for an OTP
- * 
+ *
  * @param sessionId - Session identifier
  * @returns TTL in seconds, or -1 if not found
  */
 export async function getOTPTTL(sessionId: string): Promise<number> {
   const redis = getRedisClient();
   const key = `otp:${sessionId}`;
-  
+
   try {
     return await redis.ttl(key);
   } catch (error) {

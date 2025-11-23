@@ -13,7 +13,7 @@ export const corsHeaders = {
 
 /**
  * Creates a CORS-enabled response
- * 
+ *
  * @param data - Response data
  * @param status - HTTP status code
  * @returns NextResponse with CORS headers
@@ -27,7 +27,7 @@ export function corsResponse(data: any, status: number = 200): NextResponse {
 
 /**
  * Handles OPTIONS preflight request
- * 
+ *
  * @returns NextResponse with CORS headers
  */
 export function corsPreflight(): NextResponse {
@@ -36,4 +36,3 @@ export function corsPreflight(): NextResponse {
     headers: corsHeaders,
   });
 }
-

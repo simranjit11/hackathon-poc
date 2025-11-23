@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiKey } from '@/lib/api-key-auth';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { findUserById } from '@/lib/users';
-import { corsResponse, corsPreflight } from '@/lib/cors';
 
 /**
  * GET /api/internal/users/[id]
- * 
+ *
  * Server-to-server endpoint to get user details by user_id.
  * Requires API key authentication (X-API-Key header).
- * 
+ *
  * Used by MCP server and other backend services to retrieve
  * user information like email, phone number, etc.
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
     return corsPreflight();
@@ -31,35 +28,32 @@ export async function GET(
     const { id: user_id } = await params;
 
     if (!user_id) {
-      return corsResponse(
-        { error: 'user_id is required' },
-        400
-      );
+      return corsResponse({ error: 'user_id is required' }, 400);
     }
 
     // Get user details
     const user = await findUserById(user_id);
-    
+
     if (!user) {
-      return corsResponse(
-        { error: 'User not found' },
-        404
-      );
+      return corsResponse({ error: 'User not found' }, 404);
     }
 
     // Return user information (including sensitive fields for internal use)
-    return corsResponse({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name || null,
-        roles: user.roles,
-        permissions: user.permissions,
-        createdAt: user.createdAt.toISOString(),
-        lastLoginAt: user.lastLoginAt?.toISOString() || null,
-        // Note: Phone number can be added to User schema if needed
+    return corsResponse(
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name || null,
+          roles: user.roles,
+          permissions: user.permissions,
+          createdAt: user.createdAt.toISOString(),
+          lastLoginAt: user.lastLoginAt?.toISOString() || null,
+          // Note: Phone number can be added to User schema if needed
+        },
       },
-    }, 200);
+      200
+    );
   } catch (error) {
     console.error('Error fetching user details:', error);
     return corsResponse(
@@ -75,4 +69,3 @@ export async function GET(
 export async function OPTIONS() {
   return corsPreflight();
 }
-

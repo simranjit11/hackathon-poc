@@ -10,6 +10,24 @@ import { useState } from 'react';
 import type { ElicitationContext } from '@/lib/elicitation-types';
 import { cn } from '@/lib/utils';
 
+/**
+ * Confirmation Dialog Component
+ * ==============================
+ * Displays payment details and confirmation/cancel buttons.
+ */
+
+/**
+ * Confirmation Dialog Component
+ * ==============================
+ * Displays payment details and confirmation/cancel buttons.
+ */
+
+/**
+ * Confirmation Dialog Component
+ * ==============================
+ * Displays payment details and confirmation/cancel buttons.
+ */
+
 export interface ConfirmationDialogProps {
   context: ElicitationContext;
   onConfirm: () => void;
@@ -37,10 +55,10 @@ export function ConfirmationDialog({
   };
 
   return (
-    <div className="flex flex-col space-y-6 max-w-md mx-auto">
+    <div className="mx-auto flex max-w-md flex-col space-y-6">
       {/* Header */}
       <div className="text-center">
-        <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 mb-4">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-yellow-100">
           <svg
             className="h-6 w-6 text-yellow-600"
             xmlns="http://www.w3.org/2000/svg"
@@ -63,24 +81,20 @@ export function ConfirmationDialog({
       </div>
 
       {/* Payment Details */}
-      <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-        <div className="flex justify-between items-center">
+      <div className="space-y-3 rounded-lg bg-gray-50 p-4">
+        <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-gray-500">Amount</span>
-          <span className="text-lg font-semibold text-gray-900">
-            {context.amount}
-          </span>
+          <span className="text-lg font-semibold text-gray-900">{context.amount}</span>
         </div>
 
         <div className="border-t border-gray-200" />
 
-        <div className="flex justify-between items-center">
+        <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-gray-500">To</span>
-          <span className="text-sm font-medium text-gray-900">
-            {context.payee}
-          </span>
+          <span className="text-sm font-medium text-gray-900">{context.payee}</span>
         </div>
 
-        <div className="flex justify-between items-center">
+        <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-gray-500">From Account</span>
           <span className="text-sm text-gray-900">{context.account}</span>
         </div>
@@ -88,9 +102,9 @@ export function ConfirmationDialog({
         {context.description && (
           <>
             <div className="border-t border-gray-200" />
-            <div className="flex justify-between items-start">
+            <div className="flex items-start justify-between">
               <span className="text-sm font-medium text-gray-500">Description</span>
-              <span className="text-sm text-gray-900 text-right max-w-[60%]">
+              <span className="max-w-[60%] text-right text-sm text-gray-900">
                 {context.description}
               </span>
             </div>
@@ -101,7 +115,7 @@ export function ConfirmationDialog({
           <>
             <div className="border-t border-gray-200" />
             {Object.entries(context.additional_info).map(([key, value]) => (
-              <div key={key} className="flex justify-between items-center">
+              <div key={key} className="flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-500 capitalize">
                   {key.replace(/_/g, ' ')}
                 </span>
@@ -143,12 +157,12 @@ export function ConfirmationDialog({
           onClick={onCancel}
           disabled={disabled || isConfirming}
           className={cn(
-            'flex-1 px-4 py-2 border border-gray-300 rounded-lg',
-            'text-sm font-medium text-gray-700 bg-white',
-            'hover:bg-gray-50 focus:outline-none focus:ring-2',
-            'focus:ring-offset-2 focus:ring-gray-500',
+            'flex-1 rounded-lg border border-gray-300 px-4 py-2',
+            'bg-white text-sm font-medium text-gray-700',
+            'hover:bg-gray-50 focus:ring-2 focus:outline-none',
+            'focus:ring-gray-500 focus:ring-offset-2',
             'transition-colors duration-200',
-            (disabled || isConfirming) && 'opacity-50 cursor-not-allowed'
+            (disabled || isConfirming) && 'cursor-not-allowed opacity-50'
           )}
         >
           Cancel
@@ -158,18 +172,18 @@ export function ConfirmationDialog({
           onClick={handleConfirm}
           disabled={disabled || isConfirming}
           className={cn(
-            'flex-1 px-4 py-2 border border-transparent rounded-lg',
-            'text-sm font-medium text-white bg-blue-600',
-            'hover:bg-blue-700 focus:outline-none focus:ring-2',
-            'focus:ring-offset-2 focus:ring-blue-500',
+            'flex-1 rounded-lg border border-transparent px-4 py-2',
+            'bg-blue-600 text-sm font-medium text-white',
+            'hover:bg-blue-700 focus:ring-2 focus:outline-none',
+            'focus:ring-blue-500 focus:ring-offset-2',
             'transition-colors duration-200',
-            (disabled || isConfirming) && 'opacity-50 cursor-not-allowed'
+            (disabled || isConfirming) && 'cursor-not-allowed opacity-50'
           )}
         >
           {isConfirming ? (
             <span className="flex items-center justify-center">
               <svg
-                className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                className="mr-2 -ml-1 h-4 w-4 animate-spin text-white"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
@@ -197,10 +211,9 @@ export function ConfirmationDialog({
       </div>
 
       {/* Security Notice */}
-      <p className="text-xs text-center text-gray-400">
+      <p className="text-center text-xs text-gray-400">
         🔒 This transaction is secure and encrypted
       </p>
     </div>
   );
 }
-

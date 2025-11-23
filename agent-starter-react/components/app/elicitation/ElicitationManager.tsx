@@ -8,27 +8,40 @@
 'use client';
 
 import { useElicitation } from '@/hooks/useElicitation';
-import { OTPInput } from './OTPInput';
-import { ConfirmationDialog } from './ConfirmationDialog';
-import { ElicitationForm } from './ElicitationForm';
 import { validateOTP } from '@/lib/elicitation-types';
 import { cn } from '@/lib/utils';
+import { ConfirmationDialog } from './ConfirmationDialog';
+import { ElicitationForm } from './ElicitationForm';
+import { OTPInput } from './OTPInput';
+
+/**
+ * Elicitation Manager Component
+ * ==============================
+ * Main component that manages elicitation UI rendering and submission.
+ * Routes to appropriate component based on elicitation type.
+ */
+
+/**
+ * Elicitation Manager Component
+ * ==============================
+ * Main component that manages elicitation UI rendering and submission.
+ * Routes to appropriate component based on elicitation type.
+ */
+
+/**
+ * Elicitation Manager Component
+ * ==============================
+ * Main component that manages elicitation UI rendering and submission.
+ * Routes to appropriate component based on elicitation type.
+ */
 
 export interface ElicitationManagerProps {
   className?: string;
 }
 
 export function ElicitationManager({ className }: ElicitationManagerProps) {
-  const {
-    active,
-    request,
-    isSubmitting,
-    error,
-    submitResponse,
-    cancel,
-    clearError,
-    isConnected,
-  } = useElicitation();
+  const { active, request, isSubmitting, error, submitResponse, cancel, clearError, isConnected } =
+    useElicitation();
 
   // Don't render if no active elicitation
   if (!active || !request) {
@@ -62,15 +75,12 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                Enter OTP
-              </h3>
+              <h3 className="mb-2 text-lg font-medium text-gray-900">Enter OTP</h3>
               <p className="text-sm text-gray-500">
-                To complete this payment of {schema.context.amount} to{' '}
-                {schema.context.payee}
+                To complete this payment of {schema.context.amount} to {schema.context.payee}
               </p>
             </div>
-            
+
             <OTPInput
               length={6}
               onComplete={handleOTPComplete}
@@ -79,12 +89,12 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
               error={error || undefined}
               autoFocus
             />
-            
+
             {!isSubmitting && (
               <div className="text-center">
                 <button
                   onClick={cancel}
-                  className="text-sm text-gray-600 hover:text-gray-900 underline"
+                  className="text-sm text-gray-600 underline hover:text-gray-900"
                 >
                   Cancel Transaction
                 </button>
@@ -109,7 +119,7 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
         return (
           <div className="space-y-4">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
+              <h3 className="mb-2 text-lg font-medium text-gray-900">
                 {schema.elicitation_type === 'supervisor_approval'
                   ? 'Supervisor Approval Required'
                   : 'Additional Information Required'}
@@ -118,7 +128,7 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
                 Payment: {schema.context.amount} to {schema.context.payee}
               </p>
             </div>
-            
+
             <ElicitationForm
               fields={schema.fields}
               onSubmit={handleFormSubmit}
@@ -135,7 +145,7 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
             <p>Unknown elicitation type: {schema.elicitation_type}</p>
             <button
               onClick={cancel}
-              className="mt-4 text-sm text-blue-600 hover:text-blue-800 underline"
+              className="mt-4 text-sm text-blue-600 underline hover:text-blue-800"
             >
               Cancel
             </button>
@@ -149,9 +159,9 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
       {/* Overlay */}
       <div
         className={cn(
-          'fixed inset-0 bg-black bg-opacity-50 z-40',
+          'bg-opacity-50 fixed inset-0 z-40 bg-black',
           'transition-opacity duration-300',
-          active ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          active ? 'opacity-100' : 'pointer-events-none opacity-0'
         )}
         onClick={cancel}
       />
@@ -166,7 +176,7 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
       >
         <div
           className={cn(
-            'bg-white rounded-lg shadow-xl p-6 max-w-lg w-full',
+            'w-full max-w-lg rounded-lg bg-white p-6 shadow-xl',
             'pointer-events-auto',
             'transform transition-all duration-300',
             active ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
@@ -192,9 +202,7 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
                   </svg>
                 </div>
                 <div className="ml-3">
-                  <p className="text-sm text-yellow-700">
-                    Connection lost. Reconnecting...
-                  </p>
+                  <p className="text-sm text-yellow-700">Connection lost. Reconnecting...</p>
                 </div>
               </div>
             </div>
@@ -216,4 +224,3 @@ export function ElicitationManager({ className }: ElicitationManagerProps) {
     </>
   );
 }
-

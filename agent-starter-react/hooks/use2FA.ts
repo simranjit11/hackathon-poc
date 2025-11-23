@@ -1,11 +1,10 @@
 /**
  * Web 2FA Authentication Hook
- * 
+ *
  * Provides two-factor authentication functionality for web users
  * Supports SMS and Email OTP verification
  */
-
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
 export type TwoFactorMethod = 'sms' | 'email';
 
@@ -16,7 +15,10 @@ export interface TwoFactorAuthResult {
 }
 
 export interface Use2FAReturn {
-  sendOTP: (method: TwoFactorMethod, phoneOrEmail: string) => Promise<{ success: boolean; error?: string; sessionId?: string }>;
+  sendOTP: (
+    method: TwoFactorMethod,
+    phoneOrEmail: string
+  ) => Promise<{ success: boolean; error?: string; sessionId?: string }>;
   verifyOTP: (code: string, sessionId?: string) => Promise<TwoFactorAuthResult>;
   isLoading: boolean;
   isOTPSent: boolean;
@@ -24,7 +26,7 @@ export interface Use2FAReturn {
 
 /**
  * Hook for two-factor authentication
- * 
+ *
  * @returns 2FA functions and state
  */
 export function use2FA(): Use2FAReturn {
@@ -34,13 +36,16 @@ export function use2FA(): Use2FAReturn {
 
   /**
    * Send OTP to user's phone or email
-   * 
+   *
    * @param method - 'sms' or 'email'
    * @param phoneOrEmail - Phone number or email address
    * @returns Success status and optional error message
    */
   const sendOTP = useCallback(
-    async (method: TwoFactorMethod, phoneOrEmail: string): Promise<{ success: boolean; error?: string; sessionId?: string }> => {
+    async (
+      method: TwoFactorMethod,
+      phoneOrEmail: string
+    ): Promise<{ success: boolean; error?: string; sessionId?: string }> => {
       setIsLoading(true);
       try {
         const response = await fetch('/api/auth/2fa/send', {
@@ -81,7 +86,7 @@ export function use2FA(): Use2FAReturn {
 
   /**
    * Verify OTP code
-   * 
+   *
    * @param code - The OTP code entered by the user
    * @param sessionId - The session ID from sendOTP response
    * @returns Authentication result with success status
@@ -90,7 +95,7 @@ export function use2FA(): Use2FAReturn {
     async (code: string, sessionIdParam?: string): Promise<TwoFactorAuthResult> => {
       setIsLoading(true);
       const currentSessionId = sessionIdParam || sessionId;
-      
+
       if (!currentSessionId) {
         return {
           success: false,
@@ -119,10 +124,10 @@ export function use2FA(): Use2FAReturn {
         }
 
         const data = await response.json();
-        
+
         setIsOTPSent(false);
         setSessionId(null);
-        
+
         return {
           success: true,
           sessionId: currentSessionId,
@@ -147,4 +152,3 @@ export function use2FA(): Use2FAReturn {
     isOTPSent,
   };
 }
-

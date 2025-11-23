@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
-import { initiatePayment, PaymentInitiationOptions } from '@/lib/banking/payments';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { PaymentInitiationOptions, initiatePayment } from '@/lib/banking/payments';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 
 interface PaymentInitiateRequest {
   fromAccount: string; // Account ID or account number
@@ -42,10 +42,7 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!body.fromAccount || !body.amount) {
-      return corsResponse(
-        { error: 'fromAccount and amount are required' },
-        400
-      );
+      return corsResponse({ error: 'fromAccount and amount are required' }, 400);
     }
 
     // Build payment options
@@ -64,9 +61,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate at least one payment destination is provided
-    if (!options.beneficiaryId && !options.beneficiaryNickname && !options.paymentAddress && !options.toAccount) {
+    if (
+      !options.beneficiaryId &&
+      !options.beneficiaryNickname &&
+      !options.paymentAddress &&
+      !options.toAccount
+    ) {
       return corsResponse(
-        { error: 'Payment destination required: beneficiaryId, beneficiaryNickname, paymentAddress, or toAccount' },
+        {
+          error:
+            'Payment destination required: beneficiaryId, beneficiaryNickname, paymentAddress, or toAccount',
+        },
         400
       );
     }
@@ -82,7 +87,7 @@ export async function POST(request: NextRequest) {
 
     // Return response (include OTP in development mode)
     const isDevelopment = process.env.NODE_ENV === 'development';
-    
+
     return corsResponse(
       {
         transaction: result.transaction,
@@ -96,45 +101,30 @@ export async function POST(request: NextRequest) {
     console.error('Error initiating payment:', error);
 
     if (error instanceof Error && error.message.includes('missing')) {
-      return corsResponse(
-        { error: 'Authorization header is required' },
-        401
-      );
+      return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
-      return corsResponse(
-        { error: error.message },
-        401
-      );
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
+      return corsResponse({ error: error.message }, 401);
     }
 
     if (error instanceof Error) {
       // Handle specific business logic errors
       if (error.message.includes('not found') || error.message.includes('Beneficiary')) {
-        return corsResponse(
-          { error: error.message },
-          404
-        );
+        return corsResponse({ error: error.message }, 404);
       }
       if (error.message.includes('Insufficient') || error.message.includes('balance')) {
-        return corsResponse(
-          { error: error.message },
-          400
-        );
+        return corsResponse({ error: error.message }, 400);
       }
       if (error.message.includes('Invalid') || error.message.includes('required')) {
-        return corsResponse(
-          { error: error.message },
-          400
-        );
+        return corsResponse({ error: error.message }, 400);
       }
     }
 
-    return corsResponse(
-      { error: 'Internal server error' },
-      500
-    );
+    return corsResponse({ error: 'Internal server error' }, 500);
   }
 }
 
@@ -144,5 +134,3 @@ export async function POST(request: NextRequest) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

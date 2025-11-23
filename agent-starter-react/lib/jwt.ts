@@ -5,11 +5,12 @@ import type { UserIdentity } from './auth';
  * JWT token generation utilities
  */
 
-const AUTH_SECRET_KEY = process.env.AUTH_SECRET_KEY || 'mock-secret-key-for-development-change-in-production';
+const AUTH_SECRET_KEY =
+  process.env.AUTH_SECRET_KEY || 'mock-secret-key-for-development-change-in-production';
 
 /**
  * Generates a JWT access token for a user
- * 
+ *
  * @param userIdentity - User identity information
  * @param expiresIn - Token expiration time (default: 1 hour)
  * @returns Signed JWT token string
@@ -19,7 +20,7 @@ export async function generateAccessToken(
   expiresIn: string = '1h'
 ): Promise<string> {
   const secret = new TextEncoder().encode(AUTH_SECRET_KEY);
-  
+
   const token = await new SignJWT({
     user_id: userIdentity.user_id,
     email: userIdentity.email,
@@ -37,7 +38,7 @@ export async function generateAccessToken(
 
 /**
  * Generates a JWT token with additional claims (e.g., biometric verification)
- * 
+ *
  * @param userIdentity - User identity information
  * @param additionalClaims - Additional claims to include in token
  * @param expiresIn - Token expiration time (default: 1 hour)
@@ -49,7 +50,7 @@ export async function generateAccessTokenWithClaims(
   expiresIn: string = '1h'
 ): Promise<string> {
   const secret = new TextEncoder().encode(AUTH_SECRET_KEY);
-  
+
   const token = await new SignJWT({
     user_id: userIdentity.user_id,
     email: userIdentity.email,
@@ -65,4 +66,3 @@ export async function generateAccessTokenWithClaims(
 
   return token;
 }
-

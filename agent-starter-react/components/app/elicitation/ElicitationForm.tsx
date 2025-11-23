@@ -6,10 +6,28 @@
 
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { FormEvent, useState } from 'react';
 import type { ElicitationField } from '@/lib/elicitation-types';
 import { validateField } from '@/lib/elicitation-types';
 import { cn } from '@/lib/utils';
+
+/**
+ * Dynamic Elicitation Form Component
+ * ===================================
+ * Renders form fields based on elicitation schema with validation.
+ */
+
+/**
+ * Dynamic Elicitation Form Component
+ * ===================================
+ * Renders form fields based on elicitation schema with validation.
+ */
+
+/**
+ * Dynamic Elicitation Form Component
+ * ===================================
+ * Renders form fields based on elicitation schema with validation.
+ */
 
 export interface ElicitationFormProps {
   fields: ElicitationField[];
@@ -27,21 +45,24 @@ export function ElicitationForm({
   error,
 }: ElicitationFormProps) {
   const [values, setValues] = useState<Record<string, any>>(() =>
-    fields.reduce((acc, field) => {
-      acc[field.name] = field.field_type === 'boolean' ? false : '';
-      return acc;
-    }, {} as Record<string, any>)
+    fields.reduce(
+      (acc, field) => {
+        acc[field.name] = field.field_type === 'boolean' ? false : '';
+        return acc;
+      },
+      {} as Record<string, any>
+    )
   );
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const handleChange = (name: string, value: any) => {
-    setValues(prev => ({ ...prev, [name]: value }));
-    
+    setValues((prev) => ({ ...prev, [name]: value }));
+
     // Clear error when user starts typing
     if (errors[name]) {
-      setErrors(prev => {
+      setErrors((prev) => {
         const newErrors = { ...prev };
         delete newErrors[name];
         return newErrors;
@@ -50,14 +71,14 @@ export function ElicitationForm({
   };
 
   const handleBlur = (name: string) => {
-    setTouched(prev => ({ ...prev, [name]: true }));
-    
+    setTouched((prev) => ({ ...prev, [name]: true }));
+
     // Validate field on blur
-    const field = fields.find(f => f.name === name);
+    const field = fields.find((f) => f.name === name);
     if (field) {
       const error = validateField(values[name], field.validation);
       if (error) {
-        setErrors(prev => ({ ...prev, [name]: error }));
+        setErrors((prev) => ({ ...prev, [name]: error }));
       }
     }
   };
@@ -67,7 +88,7 @@ export function ElicitationForm({
 
     // Validate all fields
     const newErrors: Record<string, string> = {};
-    fields.forEach(field => {
+    fields.forEach((field) => {
       const error = validateField(values[field.name], field.validation);
       if (error) {
         newErrors[field.name] = error;
@@ -76,10 +97,15 @@ export function ElicitationForm({
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      setTouched(fields.reduce((acc, field) => {
-        acc[field.name] = true;
-        return acc;
-      }, {} as Record<string, boolean>));
+      setTouched(
+        fields.reduce(
+          (acc, field) => {
+            acc[field.name] = true;
+            return acc;
+          },
+          {} as Record<string, boolean>
+        )
+      );
       return;
     }
 
@@ -102,13 +128,13 @@ export function ElicitationForm({
             placeholder={field.placeholder}
             disabled={disabled}
             className={cn(
-              'w-full px-3 py-2 border rounded-lg',
-              'focus:outline-none focus:ring-2 focus:ring-offset-2',
+              'w-full rounded-lg border px-3 py-2',
+              'focus:ring-2 focus:ring-offset-2 focus:outline-none',
               'transition-colors duration-200',
               hasError
                 ? 'border-red-500 focus:ring-red-500'
                 : 'border-gray-300 focus:ring-blue-500',
-              disabled && 'opacity-50 cursor-not-allowed bg-gray-50'
+              disabled && 'cursor-not-allowed bg-gray-50 opacity-50'
             )}
           />
         );
@@ -126,13 +152,13 @@ export function ElicitationForm({
             min={field.validation?.min_value}
             max={field.validation?.max_value}
             className={cn(
-              'w-full px-3 py-2 border rounded-lg',
-              'focus:outline-none focus:ring-2 focus:ring-offset-2',
+              'w-full rounded-lg border px-3 py-2',
+              'focus:ring-2 focus:ring-offset-2 focus:outline-none',
               'transition-colors duration-200',
               hasError
                 ? 'border-red-500 focus:ring-red-500'
                 : 'border-gray-300 focus:ring-blue-500',
-              disabled && 'opacity-50 cursor-not-allowed bg-gray-50'
+              disabled && 'cursor-not-allowed bg-gray-50 opacity-50'
             )}
           />
         );
@@ -147,9 +173,9 @@ export function ElicitationForm({
               onChange={(e) => handleChange(field.name, e.target.checked)}
               disabled={disabled}
               className={cn(
-                'h-4 w-4 text-blue-600 border-gray-300 rounded',
+                'h-4 w-4 rounded border-gray-300 text-blue-600',
                 'focus:ring-2 focus:ring-blue-500',
-                disabled && 'opacity-50 cursor-not-allowed'
+                disabled && 'cursor-not-allowed opacity-50'
               )}
             />
             <label htmlFor={field.name} className="ml-2 text-sm text-gray-700">
@@ -167,17 +193,17 @@ export function ElicitationForm({
             onBlur={() => handleBlur(field.name)}
             disabled={disabled}
             className={cn(
-              'w-full px-3 py-2 border rounded-lg',
-              'focus:outline-none focus:ring-2 focus:ring-offset-2',
+              'w-full rounded-lg border px-3 py-2',
+              'focus:ring-2 focus:ring-offset-2 focus:outline-none',
               'transition-colors duration-200',
               hasError
                 ? 'border-red-500 focus:ring-red-500'
                 : 'border-gray-300 focus:ring-blue-500',
-              disabled && 'opacity-50 cursor-not-allowed bg-gray-50'
+              disabled && 'cursor-not-allowed bg-gray-50 opacity-50'
             )}
           >
             <option value="">Select...</option>
-            {field.options?.map(option => (
+            {field.options?.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
@@ -191,13 +217,13 @@ export function ElicitationForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto">
-      {fields.map(field => (
+    <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
+      {fields.map((field) =>
         field.field_type !== 'boolean' ? (
           <div key={field.name}>
-            <label htmlFor={field.name} className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor={field.name} className="mb-1 block text-sm font-medium text-gray-700">
               {field.label}
-              {field.validation?.required && <span className="text-red-500 ml-1">*</span>}
+              {field.validation?.required && <span className="ml-1 text-red-500">*</span>}
             </label>
             {renderField(field)}
             {touched[field.name] && errors[field.name] && (
@@ -211,11 +237,11 @@ export function ElicitationForm({
           <div key={field.name}>
             {renderField(field)}
             {field.help_text && (
-              <p className="mt-1 text-sm text-gray-500 ml-6">{field.help_text}</p>
+              <p className="mt-1 ml-6 text-sm text-gray-500">{field.help_text}</p>
             )}
           </div>
         )
-      ))}
+      )}
 
       {error && (
         <div className="rounded-md bg-red-50 p-4">
@@ -229,12 +255,12 @@ export function ElicitationForm({
           onClick={onCancel}
           disabled={disabled}
           className={cn(
-            'flex-1 px-4 py-2 border border-gray-300 rounded-lg',
-            'text-sm font-medium text-gray-700 bg-white',
-            'hover:bg-gray-50 focus:outline-none focus:ring-2',
-            'focus:ring-offset-2 focus:ring-gray-500',
+            'flex-1 rounded-lg border border-gray-300 px-4 py-2',
+            'bg-white text-sm font-medium text-gray-700',
+            'hover:bg-gray-50 focus:ring-2 focus:outline-none',
+            'focus:ring-gray-500 focus:ring-offset-2',
             'transition-colors duration-200',
-            disabled && 'opacity-50 cursor-not-allowed'
+            disabled && 'cursor-not-allowed opacity-50'
           )}
         >
           Cancel
@@ -244,12 +270,12 @@ export function ElicitationForm({
           type="submit"
           disabled={disabled}
           className={cn(
-            'flex-1 px-4 py-2 border border-transparent rounded-lg',
-            'text-sm font-medium text-white bg-blue-600',
-            'hover:bg-blue-700 focus:outline-none focus:ring-2',
-            'focus:ring-offset-2 focus:ring-blue-500',
+            'flex-1 rounded-lg border border-transparent px-4 py-2',
+            'bg-blue-600 text-sm font-medium text-white',
+            'hover:bg-blue-700 focus:ring-2 focus:outline-none',
+            'focus:ring-blue-500 focus:ring-offset-2',
             'transition-colors duration-200',
-            disabled && 'opacity-50 cursor-not-allowed'
+            disabled && 'cursor-not-allowed opacity-50'
           )}
         >
           Submit
@@ -258,4 +284,3 @@ export function ElicitationForm({
     </form>
   );
 }
-

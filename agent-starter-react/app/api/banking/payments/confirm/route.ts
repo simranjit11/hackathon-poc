@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
 import { confirmPayment } from '@/lib/banking/payments';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 
 interface PaymentConfirmRequest {
   paymentSessionId: string;
@@ -37,18 +37,11 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!body.paymentSessionId || !body.otpCode) {
-      return corsResponse(
-        { error: 'paymentSessionId and otpCode are required' },
-        400
-      );
+      return corsResponse({ error: 'paymentSessionId and otpCode are required' }, 400);
     }
 
     // Confirm payment
-    const result = await confirmPayment(
-      user.user_id,
-      body.paymentSessionId,
-      body.otpCode
-    );
+    const result = await confirmPayment(user.user_id, body.paymentSessionId, body.otpCode);
 
     return corsResponse(
       {
@@ -61,52 +54,34 @@ export async function POST(request: NextRequest) {
     console.error('Error confirming payment:', error);
 
     if (error instanceof Error && error.message.includes('missing')) {
-      return corsResponse(
-        { error: 'Authorization header is required' },
-        401
-      );
+      return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
       // Check if it's an auth error or OTP error
       if (error.message.includes('OTP') || error.message.includes('expired')) {
-        return corsResponse(
-          { error: error.message },
-          400
-        );
+        return corsResponse({ error: error.message }, 400);
       }
-      return corsResponse(
-        { error: error.message },
-        401
-      );
+      return corsResponse({ error: error.message }, 401);
     }
 
     if (error instanceof Error) {
       // Handle specific business logic errors
       if (error.message.includes('not found') || error.message.includes('session')) {
-        return corsResponse(
-          { error: error.message },
-          404
-        );
+        return corsResponse({ error: error.message }, 404);
       }
       if (error.message.includes('already processed') || error.message.includes('completed')) {
-        return corsResponse(
-          { error: error.message },
-          409
-        );
+        return corsResponse({ error: error.message }, 409);
       }
       if (error.message.includes('Insufficient') || error.message.includes('expired')) {
-        return corsResponse(
-          { error: error.message },
-          400
-        );
+        return corsResponse({ error: error.message }, 400);
       }
     }
 
-    return corsResponse(
-      { error: 'Internal server error' },
-      500
-    );
+    return corsResponse({ error: 'Internal server error' }, 500);
   }
 }
 
@@ -116,5 +91,3 @@ export async function POST(request: NextRequest) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

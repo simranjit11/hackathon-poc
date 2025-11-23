@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requireApiKey } from '@/lib/api-key-auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -67,5 +67,3 @@ export async function GET(
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-

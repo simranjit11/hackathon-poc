@@ -32,11 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Confirm payment
-    const result = await confirmPayment(
-      body.userId,
-      body.paymentSessionId,
-      body.otpCode
-    );
+    const result = await confirmPayment(body.userId, body.paymentSessionId, body.otpCode);
 
     return NextResponse.json(
       {
@@ -50,36 +46,24 @@ export async function POST(request: NextRequest) {
 
     if (error instanceof Error) {
       // Handle specific business logic errors
-      if (error.message.includes('Invalid') || error.message.includes('expired') || error.message.includes('OTP')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        );
+      if (
+        error.message.includes('Invalid') ||
+        error.message.includes('expired') ||
+        error.message.includes('OTP')
+      ) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
       }
       if (error.message.includes('not found') || error.message.includes('session')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 404 }
-        );
+        return NextResponse.json({ error: error.message }, { status: 404 });
       }
       if (error.message.includes('already processed') || error.message.includes('completed')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 409 }
-        );
+        return NextResponse.json({ error: error.message }, { status: 409 });
       }
       if (error.message.includes('Insufficient') || error.message.includes('balance')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: error.message }, { status: 400 });
       }
     }
 
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

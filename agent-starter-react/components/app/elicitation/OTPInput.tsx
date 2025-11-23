@@ -6,8 +6,26 @@
 
 'use client';
 
-import { useState, useRef, useEffect, KeyboardEvent, ClipboardEvent } from 'react';
+import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
+
+/**
+ * OTP Input Component
+ * ===================
+ * 6-digit OTP input with auto-focus and validation.
+ */
+
+/**
+ * OTP Input Component
+ * ===================
+ * 6-digit OTP input with auto-focus and validation.
+ */
+
+/**
+ * OTP Input Component
+ * ===================
+ * 6-digit OTP input with auto-focus and validation.
+ */
 
 export interface OTPInputProps {
   length?: number;
@@ -38,7 +56,7 @@ export function OTPInput({
 
   // Call onComplete when OTP is filled
   useEffect(() => {
-    const isComplete = otp.every(digit => digit !== '');
+    const isComplete = otp.every((digit) => digit !== '');
     if (isComplete) {
       onComplete(otp.join(''));
     }
@@ -64,7 +82,7 @@ export function OTPInput({
     if (e.key === 'Backspace') {
       e.preventDefault();
       const newOtp = [...otp];
-      
+
       if (otp[index]) {
         // Clear current input
         newOtp[index] = '';
@@ -90,10 +108,10 @@ export function OTPInput({
   const handlePaste = (e: ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
     const pastedData = e.clipboardData.getData('text/plain').trim();
-    
+
     // Only accept digits
     const digits = pastedData.replace(/\D/g, '').slice(0, length);
-    
+
     if (digits.length > 0) {
       const newOtp = [...otp];
       for (let i = 0; i < digits.length; i++) {
@@ -102,9 +120,9 @@ export function OTPInput({
         }
       }
       setOtp(newOtp);
-      
+
       // Focus the next empty input or the last input
-      const nextEmptyIndex = newOtp.findIndex(d => d === '');
+      const nextEmptyIndex = newOtp.findIndex((d) => d === '');
       const focusIndex = nextEmptyIndex === -1 ? length - 1 : Math.min(nextEmptyIndex, length - 1);
       inputRefs.current[focusIndex]?.focus();
     }
@@ -134,31 +152,30 @@ export function OTPInput({
             onFocus={() => handleFocus(index)}
             disabled={disabled}
             className={cn(
-              'w-12 h-14 text-center text-2xl font-semibold',
-              'border-2 rounded-lg',
-              'focus:outline-none focus:ring-2 focus:ring-offset-2',
+              'h-14 w-12 text-center text-2xl font-semibold',
+              'rounded-lg border-2',
+              'focus:ring-2 focus:ring-offset-2 focus:outline-none',
               'transition-all duration-200',
               error
                 ? 'border-red-500 focus:ring-red-500'
                 : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500',
-              disabled && 'opacity-50 cursor-not-allowed bg-gray-50',
+              disabled && 'cursor-not-allowed bg-gray-50 opacity-50',
               otp[index] && 'border-blue-500 bg-blue-50'
             )}
             aria-label={`Digit ${index + 1}`}
           />
         ))}
       </div>
-      
+
       {error && (
-        <p className="text-sm text-red-600 text-center" role="alert">
+        <p className="text-center text-sm text-red-600" role="alert">
           {error}
         </p>
       )}
-      
-      <p className="text-sm text-gray-500 text-center">
+
+      <p className="text-center text-sm text-gray-500">
         Enter the {length}-digit code sent to your registered mobile number
       </p>
     </div>
   );
 }
-

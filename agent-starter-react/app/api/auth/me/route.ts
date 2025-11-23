@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { findUserById } from '@/lib/users';
-import { corsResponse, corsPreflight } from '@/lib/cors';
 
 /**
  * GET /api/auth/me
@@ -22,30 +22,27 @@ export async function GET(req: Request) {
     // Get full user details
     const user = await findUserById(userIdentity.user_id);
     if (!user) {
-      return corsResponse(
-        { error: 'User not found' },
-        404
-      );
+      return corsResponse({ error: 'User not found' }, 404);
     }
 
     // Return user information
-    return corsResponse({
-      user: {
-        id: user.id,
-        email: user.email,
-        roles: user.roles,
-        permissions: user.permissions,
-        name: user.name,
+    return corsResponse(
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          roles: user.roles,
+          permissions: user.permissions,
+          name: user.name,
+        },
       },
-    }, 200);
+      200
+    );
   } catch (error) {
     console.error('Token validation error:', error);
-    
+
     if (error instanceof Error && error.message.includes('missing')) {
-      return corsResponse(
-        { error: 'Authorization header is required' },
-        401
-      );
+      return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
     return corsResponse(
@@ -61,4 +58,3 @@ export async function GET(req: Request) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-

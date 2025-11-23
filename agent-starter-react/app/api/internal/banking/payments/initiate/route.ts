@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initiatePayment, PaymentInitiationOptions } from '@/lib/banking/payments';
+import { PaymentInitiationOptions, initiatePayment } from '@/lib/banking/payments';
 
 interface PaymentInitiateRequest {
   userId: string;
@@ -52,9 +52,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate at least one payment destination is provided
-    if (!options.beneficiaryId && !options.beneficiaryNickname && !options.paymentAddress && !options.toAccount) {
+    if (
+      !options.beneficiaryId &&
+      !options.beneficiaryNickname &&
+      !options.paymentAddress &&
+      !options.toAccount
+    ) {
       return NextResponse.json(
-        { error: 'Payment destination required: beneficiaryId, beneficiaryNickname, paymentAddress, or toAccount' },
+        {
+          error:
+            'Payment destination required: beneficiaryId, beneficiaryNickname, paymentAddress, or toAccount',
+        },
         { status: 400 }
       );
     }
@@ -70,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     // Return response (include OTP in development mode)
     const isDevelopment = process.env.NODE_ENV === 'development';
-    
+
     return NextResponse.json(
       {
         transaction: result.transaction,
@@ -86,29 +94,16 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error) {
       // Handle specific business logic errors
       if (error.message.includes('not found') || error.message.includes('Beneficiary')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 404 }
-        );
+        return NextResponse.json({ error: error.message }, { status: 404 });
       }
       if (error.message.includes('Insufficient') || error.message.includes('balance')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: error.message }, { status: 400 });
       }
       if (error.message.includes('Invalid') || error.message.includes('required')) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: error.message }, { status: 400 });
       }
     }
 
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

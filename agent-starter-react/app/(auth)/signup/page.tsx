@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, FormEvent, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/auth/auth-provider';
 import { Button } from '@/components/livekit/button';
 import { Input } from '@/components/ui/input';
-import { useAuth } from '@/components/auth/auth-provider';
 
 export default function SignupPage() {
   const [name, setName] = useState('');
@@ -63,20 +63,16 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center bg-background px-4">
+    <div className="bg-background flex min-h-svh flex-col items-center justify-center px-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
-          <h1 className="text-foreground text-3xl font-bold tracking-tight">
-            Create an account
-          </h1>
-          <p className="text-muted-foreground mt-2 text-sm">
-            Get started with your free account
-          </p>
+          <h1 className="text-foreground text-3xl font-bold tracking-tight">Create an account</h1>
+          <p className="text-muted-foreground mt-2 text-sm">Get started with your free account</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="bg-destructive/10 text-destructive rounded-full border border-destructive/20 px-4 py-3 text-sm">
+            <div className="bg-destructive/10 text-destructive border-destructive/20 rounded-full border px-4 py-3 text-sm">
               {error}
             </div>
           )}
@@ -127,13 +123,14 @@ export default function SignupPage() {
                 placeholder="••••••••"
                 disabled={isLoading}
               />
-              <p className="text-muted-foreground mt-1 text-xs">
-                Must be at least 8 characters
-              </p>
+              <p className="text-muted-foreground mt-1 text-xs">Must be at least 8 characters</p>
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="text-foreground mb-2 block text-sm font-medium">
+              <label
+                htmlFor="confirmPassword"
+                className="text-foreground mb-2 block text-sm font-medium"
+              >
                 Confirm password
               </label>
               <Input
@@ -149,13 +146,7 @@ export default function SignupPage() {
             </div>
           </div>
 
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            className="w-full"
-            disabled={isLoading}
-          >
+          <Button type="submit" variant="primary" size="lg" className="w-full" disabled={isLoading}>
             {isLoading ? 'Creating account...' : 'Create account'}
           </Button>
         </form>
@@ -163,10 +154,7 @@ export default function SignupPage() {
         <div className="text-center">
           <p className="text-muted-foreground text-sm">
             Already have an account?{' '}
-            <Link
-              href="/login"
-              className="text-primary hover:underline font-medium"
-            >
+            <Link href="/login" className="text-primary font-medium hover:underline">
               Sign in
             </Link>
           </p>

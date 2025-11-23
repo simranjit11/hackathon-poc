@@ -1,10 +1,10 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAccessToken, clearAccessToken } from '@/lib/auth';
 import { useLogin } from '@/hooks/useLogin';
 import { useSignup } from '@/hooks/useSignup';
+import { clearAccessToken, getAccessToken } from '@/lib/auth';
 
 interface User {
   id: string;
@@ -67,25 +67,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [checkAuth]);
 
-  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
-    const result = await loginHook({ email, password });
-    if (result) {
-      setUser(result.user);
-      router.push('/');
-      return true;
-    }
-    return false;
-  }, [loginHook, router]);
+  const login = useCallback(
+    async (email: string, password: string): Promise<boolean> => {
+      const result = await loginHook({ email, password });
+      if (result) {
+        setUser(result.user);
+        router.push('/');
+        return true;
+      }
+      return false;
+    },
+    [loginHook, router]
+  );
 
-  const signup = useCallback(async (email: string, password: string, name?: string): Promise<boolean> => {
-    const result = await signupHook({ email, password, name });
-    if (result) {
-      setUser(result.user);
-      router.push('/');
-      return true;
-    }
-    return false;
-  }, [signupHook, router]);
+  const signup = useCallback(
+    async (email: string, password: string, name?: string): Promise<boolean> => {
+      const result = await signupHook({ email, password, name });
+      if (result) {
+        setUser(result.user);
+        router.push('/');
+        return true;
+      }
+      return false;
+    },
+    [signupHook, router]
+  );
 
   const logout = useCallback(async () => {
     const token = getAccessToken();
@@ -130,4 +136,3 @@ export function useAuth() {
   }
   return context;
 }
-

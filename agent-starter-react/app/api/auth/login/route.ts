@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { validateCredentials, userToIdentity } from '@/lib/users';
-import { generateAccessTokenWithClaims } from '@/lib/jwt';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { initializeDatabases } from '@/lib/db/init';
+import { generateAccessTokenWithClaims } from '@/lib/jwt';
+import { userToIdentity, validateCredentials } from '@/lib/users';
 
 /**
  * Login request body
@@ -59,19 +59,13 @@ export async function POST(req: Request) {
 
     // Validate required fields
     if (!email || !password) {
-      return corsResponse(
-        { error: 'Email and password are required' },
-        400
-      );
+      return corsResponse({ error: 'Email and password are required' }, 400);
     }
 
     // Validate credentials
     const user = await validateCredentials(email, password);
     if (!user) {
-      return corsResponse(
-        { error: 'Invalid email or password' },
-        401
-      );
+      return corsResponse({ error: 'Invalid email or password' }, 401);
     }
 
     // Validate biometric token if provided (mobile)
@@ -79,10 +73,7 @@ export async function POST(req: Request) {
       // In production, validate biometric token against auth service
       // For hackathon, just check that it's present and has expected format
       if (!biometricToken.startsWith('biometric_')) {
-        return corsResponse(
-          { error: 'Invalid biometric token' },
-          401
-        );
+        return corsResponse({ error: 'Invalid biometric token' }, 401);
       }
     }
 
@@ -91,31 +82,25 @@ export async function POST(req: Request) {
       // In production, validate OTP against stored session
       // For hackathon, accept any 6-digit code
       if (!/^\d{6}$/.test(otpCode)) {
-        return corsResponse(
-          { error: 'Invalid OTP code format' },
-          400
-        );
+        return corsResponse({ error: 'Invalid OTP code format' }, 400);
       }
     }
 
     // Generate access token with additional claims
     const userIdentity = userToIdentity(user);
     const additionalClaims: Record<string, any> = {};
-    
+
     if (biometricToken) {
       additionalClaims.biometric_verified = true;
       additionalClaims.platform = 'mobile';
     }
-    
+
     if (otpCode) {
       additionalClaims.two_factor_verified = true;
       additionalClaims.platform = 'web';
     }
 
-    const accessToken = await generateAccessTokenWithClaims(
-      userIdentity,
-      additionalClaims
-    );
+    const accessToken = await generateAccessTokenWithClaims(userIdentity, additionalClaims);
 
     // Return success response
     const response: LoginResponse = {
@@ -125,7 +110,7 @@ export async function POST(req: Request) {
         email: user.email,
         roles: user.roles,
         permissions: user.permissions,
-        name: user.name,
+        name: user.name ?? undefined,
       },
     };
 
@@ -145,4 +130,3 @@ export async function POST(req: Request) {
 export async function OPTIONS() {
   return corsPreflight();
 }
-

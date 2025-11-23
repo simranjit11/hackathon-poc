@@ -9,7 +9,7 @@ let redisClient: Redis | null = null;
 
 /**
  * Get or create Redis client
- * 
+ *
  * @returns Redis client instance
  */
 export function getRedisClient(): Redis {
@@ -54,7 +54,7 @@ export async function closeRedis(): Promise<void> {
 
 /**
  * Test Redis connection
- * 
+ *
  * @returns True if connection is successful
  */
 export async function testRedisConnection(): Promise<boolean> {
@@ -67,4 +67,3 @@ export async function testRedisConnection(): Promise<boolean> {
     return false;
   }
 }
-

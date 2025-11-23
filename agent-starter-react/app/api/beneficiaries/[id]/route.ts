@@ -1,13 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/prisma";
-import { validateAccessToken, extractTokenFromHeader } from "@/lib/auth";
+import { NextRequest, NextResponse } from 'next/server';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { prisma } from '@/lib/db/prisma';
 
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authHeader = request.headers.get("Authorization");
+    const authHeader = request.headers.get('Authorization');
     const token = extractTokenFromHeader(authHeader);
     const user = await validateAccessToken(token);
 
@@ -19,7 +19,7 @@ export async function DELETE(
     });
 
     if (!existing || existing.userId !== user.user_id) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     await prisma.beneficiary.delete({
@@ -28,20 +28,14 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting beneficiary:", error);
-    return NextResponse.json(
-      { error: "Unauthorized or Internal Error" },
-      { status: 401 }
-    );
+    console.error('Error deleting beneficiary:', error);
+    return NextResponse.json({ error: 'Unauthorized or Internal Error' }, { status: 401 });
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const authHeader = request.headers.get("Authorization");
+    const authHeader = request.headers.get('Authorization');
     const token = extractTokenFromHeader(authHeader);
     const user = await validateAccessToken(token);
 
@@ -55,7 +49,7 @@ export async function PATCH(
     });
 
     if (!existing || existing.userId !== user.user_id) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     // Update beneficiary
@@ -72,17 +66,14 @@ export async function PATCH(
 
     return NextResponse.json(updated);
   } catch (error) {
-    console.error("Error updating beneficiary:", error);
+    console.error('Error updating beneficiary:', error);
     // Check for unique constraint violation (P2002)
     if ((error as any).code === 'P2002') {
       return NextResponse.json(
-        { error: "A beneficiary with this nickname already exists" },
+        { error: 'A beneficiary with this nickname already exists' },
         { status: 409 }
       );
     }
-    return NextResponse.json(
-      { error: "Unauthorized or Internal Error" },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: 'Unauthorized or Internal Error' }, { status: 401 });
   }
 }

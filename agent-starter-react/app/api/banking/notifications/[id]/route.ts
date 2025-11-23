@@ -1,6 +1,6 @@
-import { NextRequest } from 'next/server';
-import { validateAccessToken, extractTokenFromHeader } from '@/lib/auth';
-import { corsResponse, corsPreflight } from '@/lib/cors';
+import { NextRequest, NextResponse } from 'next/server';
+import { extractTokenFromHeader, validateAccessToken } from '@/lib/auth';
+import { corsPreflight, corsResponse } from '@/lib/cors';
 import { prisma } from '@/lib/db/prisma';
 
 const VALID_CHANNELS = ['email', 'sms', 'push'];
@@ -10,10 +10,7 @@ const VALID_EVENT_TYPES = ['payment', 'alert', 'balance', 'transaction'];
  * PUT /api/banking/notifications/[id]
  * Update an existing notification preference
  */
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (request.method === 'OPTIONS') {
     return corsPreflight();
   }
@@ -40,10 +37,7 @@ export async function PUT(
 
     // Validate channel if provided
     if (body.channel && !VALID_CHANNELS.includes(body.channel)) {
-      return corsResponse(
-        { error: `channel must be one of: ${VALID_CHANNELS.join(', ')}` },
-        400
-      );
+      return corsResponse({ error: `channel must be one of: ${VALID_CHANNELS.join(', ')}` }, 400);
     }
 
     // Validate eventType if provided
@@ -107,7 +101,10 @@ export async function PUT(
       return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
       return corsResponse({ error: error.message }, 401);
     }
 
@@ -167,7 +164,10 @@ export async function DELETE(
       return corsResponse({ error: 'Authorization header is required' }, 401);
     }
 
-    if (error instanceof Error && (error.message.includes('Invalid') || error.message.includes('expired'))) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid') || error.message.includes('expired'))
+    ) {
       return corsResponse({ error: error.message }, 401);
     }
 
@@ -178,5 +178,3 @@ export async function DELETE(
 export async function OPTIONS() {
   return corsPreflight();
 }
-
-
