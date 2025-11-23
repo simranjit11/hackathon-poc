@@ -209,19 +209,23 @@ async def get_balance(
 async def get_transactions(
     jwt_token: str,
     account_type: Optional[str] = None,
+    account_id: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    limit: int = 10
+    limit: int = 10,
+    offset: int = 0
 ) -> List[dict]:
     """
-    Get transaction history for the authenticated user.
+    Get transaction history for the authenticated user with pagination support.
     
     Args:
         jwt_token: JWT authentication token with 'read' scope
-        account_type: Optional account type filter
+        account_type: Optional account type filter (checking, savings, credit_card)
+        account_id: Optional account ID filter (UUID). If not provided, defaults to savings account
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
         limit: Maximum number of transactions (default: 10, max: 100)
+        offset: Number of transactions to skip for pagination (default: 0)
         
     Returns:
         List of transaction responses, sorted by date (most recent first)
@@ -233,19 +237,23 @@ async def get_transactions(
         user = get_user_from_token(jwt_token)
         logger.info(
             f"Transaction request for user_id: {user.user_id}, "
-            f"limit: {limit}"
+            f"account_id: {account_id or 'default (savings)'}, "
+            f"limit: {limit}, offset: {offset}"
         )
         
         # Validate limit
         limit = max(1, min(100, limit))
         
-        # Build cache key
+        # Validate offset
+        offset = max(0, offset)
+        
+        # Build cache key (include offset for pagination)
         cache_key = (
             f"transactions:{user.user_id}:"
-            f"{account_type or 'all'}:"
+            f"{account_id or account_type or 'default'}:"
             f"{start_date or 'none'}:"
             f"{end_date or 'none'}:"
-            f"{limit}"
+            f"{limit}:{offset}"
         )
         
         # Check cache
@@ -261,9 +269,11 @@ async def get_transactions(
         transactions = await banking_api.get_transactions(
             user.user_id,
             account_type=account_type,
+            account_id=account_id,
             start_date=start_date,
             end_date=end_date,
-            limit=limit
+            limit=limit,
+            offset=offset
             # jwt_token omitted - will use API key authentication
         )
         

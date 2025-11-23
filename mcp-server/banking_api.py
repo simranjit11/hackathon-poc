@@ -180,19 +180,23 @@ class BankingAPI:
         self,
         user_id: str,
         account_type: Optional[str] = None,
+        account_id: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
-        Get transactions for a user.
+        Get transactions for a user with pagination support.
         
         Args:
             user_id: User identifier
-            account_type: Optional account type filter
+            account_type: Optional account type filter (checking, savings, credit_card)
+            account_id: Optional account ID filter (UUID). If not provided, defaults to savings account
             start_date: Optional start date filter (YYYY-MM-DD)
             end_date: Optional end date filter (YYYY-MM-DD)
-            limit: Maximum number of transactions
+            limit: Maximum number of transactions (default: 10, max: 100)
+            offset: Number of transactions to skip for pagination (default: 0)
             
         Returns:
             List of transaction dictionaries
@@ -202,12 +206,16 @@ class BankingAPI:
             params = []
             if account_type:
                 params.append(f"accountType={account_type}")
+            if account_id:
+                params.append(f"accountId={account_id}")
             if start_date:
                 params.append(f"startDate={start_date}")
             if end_date:
                 params.append(f"endDate={end_date}")
             if limit:
                 params.append(f"limit={limit}")
+            if offset:
+                params.append(f"offset={offset}")
             
             result = await self._get_with_api_key(f"/api/internal/banking/transactions/{user_id}?{'&'.join(params)}")
             

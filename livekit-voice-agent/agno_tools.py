@@ -43,14 +43,15 @@ class AuthenticatedMCPTools:
             "get_transactions": ["read"],
             "get_loans": ["read"],
             "get_credit_limit": ["read"],
-            "get_alerts": ["read"],
-            "get_interest_rates": ["read"],
             "get_current_date_time": ["read"],
             "get_user_details": ["read"],  # Get user profile information
             "get_transfer_contacts": ["read"],  # Get beneficiaries/contacts
             "initiate_payment": ["transact"],  # Initiate payment with elicitation
             "confirm_payment": ["transact"],  # Confirm payment with OTP
-            "set_alert": ["configure"],
+            "create_reminder": ["configure"],  # Create payment reminder
+            "get_reminders": ["read"],  # Get payment reminders
+            "update_reminder": ["configure"],  # Update payment reminder
+            "delete_reminder": ["configure"],  # Delete payment reminder
         }
     
     async def _call_tool(self, tool_name: str, **kwargs) -> Any:
@@ -107,7 +108,7 @@ class AuthenticatedMCPTools:
             },
             {
                 "name": "get_transactions",
-                "description": "Get transaction history for the authenticated user. Can filter by account_type (checking, savings, credit_card), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), and limit (default: 10, max: 100). Returns list of recent transactions.",
+                "description": "Get transaction history for the authenticated user with pagination. Can filter by account_type (checking, savings, credit_card), account_id (UUID - optional, defaults to savings account if not provided), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), limit (default: 10, max: 100), and offset (default: 0) for pagination. Returns list of transactions sorted by date (most recent first).",
                 "func": self._create_tool_func_with_params("get_transactions"),
             },
             {
@@ -119,16 +120,6 @@ class AuthenticatedMCPTools:
                 "name": "get_credit_limit",
                 "description": "Get credit card limits and available credit for the authenticated user. Returns credit limit information.",
                 "func": self._create_tool_func_no_params("get_credit_limit"),
-            },
-            {
-                "name": "get_alerts",
-                "description": "Get active payment alerts and reminders for the authenticated user. Returns list of alerts.",
-                "func": self._create_tool_func_no_params("get_alerts"),
-            },
-            {
-                "name": "get_interest_rates",
-                "description": "Get current interest rates for various banking products (deposit accounts, credit products, mortgages). Returns formatted interest rates information.",
-                "func": self._create_tool_func_no_params("get_interest_rates"),
             },
             {
                 "name": "get_current_date_time",
@@ -151,9 +142,29 @@ class AuthenticatedMCPTools:
                 "func": self._create_tool_func_with_params("initiate_payment"),
             },
             {
-                "name": "set_alert",
-                "description": "Set up a payment alert or reminder. Requires alert_type (e.g., 'low_balance', 'payment_due'), amount (threshold amount), and optional description. Returns alert confirmation.",
-                "func": self._create_tool_func_with_params("set_alert"),
+                "name": "confirm_payment",
+                "description": "Confirm a payment using OTP code. This completes a payment that was previously initiated with initiate_payment. REQUIRED: payment_session_id (from initiate_payment), otp_code (6-digit OTP sent to user). Returns payment confirmation with transaction details.",
+                "func": self._create_tool_func_with_params("confirm_payment"),
+            },
+            {
+                "name": "create_reminder",
+                "description": "Create a payment reminder. REQUIRED: scheduled_date (ISO 8601 format, e.g., '2025-12-20T10:00:00Z'), amount (number), recipient (string), account_id (UUID string). OPTIONAL: description (string), beneficiary_id (UUID string). Returns reminder confirmation with reminder details.",
+                "func": self._create_tool_func_with_params("create_reminder"),
+            },
+            {
+                "name": "get_reminders",
+                "description": "Get payment reminders for the authenticated user. OPTIONAL filters: is_completed (string: 'true' or 'false'), scheduled_date_from (ISO 8601), scheduled_date_to (ISO 8601). Returns list of payment reminders.",
+                "func": self._create_tool_func_with_params("get_reminders"),
+            },
+            {
+                "name": "update_reminder",
+                "description": "Update an existing payment reminder. REQUIRED: reminder_id (UUID string). OPTIONAL: scheduled_date (ISO 8601), amount (string), recipient (string), description (string), account_id (UUID string). Returns updated reminder details.",
+                "func": self._create_tool_func_with_params("update_reminder"),
+            },
+            {
+                "name": "delete_reminder",
+                "description": "Delete a payment reminder. REQUIRED: reminder_id (UUID string). Returns deletion confirmation.",
+                "func": self._create_tool_func_with_params("delete_reminder"),
             },
         ]
         

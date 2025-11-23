@@ -42,6 +42,7 @@ export async function GET(
     // Parse query parameters (same as public endpoint)
     const searchParams = request.nextUrl.searchParams;
     const accountType = searchParams.get('accountType');
+    const accountId = searchParams.get('accountId');
     const beneficiaryId = searchParams.get('beneficiaryId');
     const transactionType = searchParams.get('transactionType');
     const startDate = searchParams.get('startDate');
@@ -79,7 +80,12 @@ export async function GET(
     // Build where clause
     const where: any = { userId };
 
-    if (accountType) {
+    // Handle account filtering: account_id takes precedence, then accountType, then default to savings
+    if (accountId) {
+      // Filter by specific account ID
+      where.accountId = accountId;
+    } else if (accountType) {
+      // Filter by account type
       if (!['checking', 'savings', 'credit_card'].includes(accountType)) {
         return corsResponse(
           { error: 'Invalid accountType. Must be one of: checking, savings, credit_card' },
@@ -87,6 +93,21 @@ export async function GET(
         );
       }
       where.account = { accountType };
+    } else {
+      // Default to savings account if neither accountId nor accountType is provided
+      const savingsAccount = await prisma.account.findFirst({
+        where: {
+          userId,
+          accountType: 'savings',
+          status: 'active',
+        },
+        select: { id: true },
+      });
+
+      if (savingsAccount) {
+        where.accountId = savingsAccount.id;
+      }
+      // If no savings account found, don't filter by account (return all transactions)
     }
 
     if (beneficiaryId) {
